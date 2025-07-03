@@ -44,19 +44,23 @@ repository = "https://github.com/project-robius/robius"
 [workspace.dependencies]
 ## General dependencies (target-independent) used in multiple crates in the workspace.
 cfg-if = "1.0.0"
+log = "0.4"
 retry = "2.0.0"
 
 
 ## Android-specific dependencies used in multiple crates in the workspace.
-jni = "0.21.1"
+jni = { version = "0.21.1", default-features = false }
 robius-android-env = "0.2.0"
 
 
 ## Apple-specific dependencies (iOS/macOS) used in multiple crates in the workspace.
 block2 = "0.6.1"
+dispatch2 = { version = "0.3.0", default-features = false, features = ["std"] }
 objc2 = "0.6.1"
-objc2-local-authentication = { version = "0.3.1", default-features = false }
-objc2-foundation = { version = "0.3.1", default-features = false }
+objc2-app-kit              = { version = "0.3.1", default-features = false, features = ["alloc"] }
+objc2-foundation           = { version = "0.3.1", default-features = false, features = ["alloc"] }
+objc2-local-authentication = { version = "0.3.1", default-features = false, features = ["alloc"] }
+objc2-ui-kit               = { version = "0.3.1", default-features = false, features = ["alloc"] }
 
 
 ## Linux-specific dependencies used in multiple crates in the workspace.

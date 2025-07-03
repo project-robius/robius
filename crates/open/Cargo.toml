@@ -1,0 +1,44 @@
+[package]
+name = "robius-open"
+version.workspace = true
+edition.workspace = true
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Klim Tsoutsman <klim@tsoutsman.com>",
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for opening URIs on multiple platforms"
+documentation = "https://docs.rs/robius-open"
+homepage.workspace = true
+keywords = ["robius", "URI", "open", "URL", "intent"]
+categories.workspace = true
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+
+[dependencies]
+cfg-if.workspace = true
+log = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+robius-android-env.workspace = true 
+
+[target.'cfg(target_os = "ios")'.dependencies]
+block2.workspace = true
+dispatch2 = { workspace = true, features = ["objc2"] }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["alloc", "NSDictionary", "NSObject", "NSString", "NSURL"] }
+objc2-ui-kit     = { workspace = true, features = ["alloc", "block2", "UIApplication", "UIResponder"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit    = { workspace = true, features = ["NSWorkspace"] }
+objc2-foundation = { workspace = true, features = ["NSString", "NSURL"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [ "Foundation", "System" ] }
+
+[features]
+default = ["android-result"]
+android-result = []
+log = ["dep:log"]

@@ -3,8 +3,8 @@ name = "robius-authentication"
 version.workspace = true
 edition.workspace = true
 authors = [
-    "Klim Tsoutsman <klim@tsoutsman.com>",
     "Kevin Boos <kevinaboos@gmail.com>",
+    "Klim Tsoutsman <klim@tsoutsman.com>",
     "Project Robius Maintainers",
 ]
 description = "Rust abstractions for multi-platform native authentication: biometrics, fingerprint, password, screen lock, TouchID, FaceID, Windows Hello, etc."
