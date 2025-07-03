@@ -16,21 +16,31 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/project-robius/robius-authentication"
 
+
+## Note: ideally this would be only included when we're building for Android,
+## but Cargo doesn't support target-specific build scripts yet.
+## See: <https://github.com/rust-lang/cargo/issues/4932> and
+## <https://github.com/rust-lang/cargo/issues/14378#issuecomment-2278333431>.
+## We cannot simply use `cfg(target_os = "android")` here,
+## because the build script's notion of a "target" is that of the HOST system,
+## not the target. So if we were to use `cfg(target_os = "android")` here,
+## it would only take effect when building on an Android host itself, which never happens.
 [build-dependencies]
-android-build = "0.1.0"
+android-build.workspace = true
 
 [dependencies]
-cfg-if = "1.0.0"
+cfg-if.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21.1"
-robius-android-env = "0.2.0"
+jni.workspace = true
+robius-android-env.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
-block2 = "0.6.1"
-objc2 = "0.6.1"
-objc2-local-authentication = { version = "0.3.1", default-features = false, features = ["block2", "LAContext", "LAError"] }
-objc2-foundation = { version = "0.3.1", default-features = false, features = ["NSError", "NSString"] }
+block2.workspace = true
+objc2.workspace = true
+objc2-local-authentication = { workspace = true, features = ["block2", "LAContext", "LAError"] }
+objc2-foundation = { workspace = true, features = ["NSError", "NSString"] }
+
 
 ## disabled for now, sync the `async` feature isn't fully implemented.
 # [target.'cfg(any(target_vendor = "apple", target_os = "android"))'.dependencies.tokio]
@@ -40,13 +50,13 @@ objc2-foundation = { version = "0.3.1", default-features = false, features = ["N
 # optional = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-polkit = "=0.17.0"
-gio = "=0.17.0"
+polkit.workspace = true
+gio.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-retry = "2.0.0"
-windows-core = { version = "0.56.0", default-features = false }
-windows = { version = "0.56.0", default-features = false, features = [
+retry.workspace = true
+windows-core = { workspace = true }
+windows = { workspace = true, features = [
     # For UWP-based authentication.
     "Foundation",
     "Security_Credentials_UI",

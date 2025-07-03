@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "android-build"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a133d38cebf328adaea4bc1891d9568e14a394b50e4f4ba5f63dc14e8beaaee9"
+checksum = "9994787facbc3375d2b510024117d11fa98087be537ac878033892193bbb33d2"
 dependencies = [
  "windows-sys 0.52.0",
 ]

@@ -1,0 +1,74 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "crates/*",
+]
+
+# Note: we haven't yet implemented the top-level crate of re-exports.
+#
+# ## The top-level crate just re-exports the contents of each sub-crate
+# ## in the workspace, for the sake of convenience.
+# [package]
+# name = "robius"
+# version.workspace = true
+# edition.workspace = true
+# authors.workspace = true
+# description.workspace = true
+# homepage.workspace = true
+# categories.workspace = true
+# license.workspace = true
+# readme.workspace = true
+# repository.workspace = true
+
+
+## Package details that are shared across multiple crates in the workspace.
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for accessing platform APIs and OS services, for app development."
+homepage = "https://robius.rs/"
+categories = ["os", "hardware-support", "api-bindings"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/project-robius/robius"
+
+
+
+
+
+[workspace.dependencies]
+## General dependencies (target-independent) used in multiple crates in the workspace.
+cfg-if = "1.0.0"
+retry = "2.0.0"
+
+
+## Android-specific dependencies used in multiple crates in the workspace.
+jni = "0.21.1"
+robius-android-env = "0.2.0"
+
+
+## Apple-specific dependencies (iOS/macOS) used in multiple crates in the workspace.
+block2 = "0.6.1"
+objc2 = "0.6.1"
+objc2-local-authentication = { version = "0.3.1", default-features = false }
+objc2-foundation = { version = "0.3.1", default-features = false }
+
+
+## Linux-specific dependencies used in multiple crates in the workspace.
+# [target.'cfg(target_os = "linux")'.workspace.dependencies]
+polkit = "=0.17.0"
+gio = "=0.17.0"
+
+
+## Windows-specific dependencies used in multiple crates in the workspace.
+windows-core = { version = "0.56.0", default-features = false }
+windows = { version = "0.56.0", default-features = false }
+
+
+## Build-time dependencies used in multiple crates in the workspace.
+android-build = "0.1.2"
