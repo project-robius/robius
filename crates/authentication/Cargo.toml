@@ -1,7 +1,7 @@
 [package]
 name = "robius-authentication"
-version = "0.2.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 authors = [
     "Klim Tsoutsman <klim@tsoutsman.com>",
     "Kevin Boos <kevinaboos@gmail.com>",
@@ -9,12 +9,12 @@ authors = [
 ]
 description = "Rust abstractions for multi-platform native authentication: biometrics, fingerprint, password, screen lock, TouchID, FaceID, Windows Hello, etc."
 documentation = "https://docs.rs/robius-authentication"
-homepage = "https://robius.rs/"
+homepage.workspace = true
 keywords = ["robius", "authentication", "biometric", "password", "fingerprint"]
-categories = ["os", "hardware-support", "api-bindings"]
-license = "MIT"
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
 readme = "README.md"
-repository = "https://github.com/project-robius/robius-authentication"
 
 
 ## Note: ideally this would be only included when we're building for Android,
