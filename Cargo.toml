@@ -46,6 +46,7 @@ repository = "https://github.com/project-robius/robius"
 cfg-if = "1.0.0"
 log = "0.4"
 retry = "2.0.0"
+tokio = { version = "1.43.1", default-features = false }
 
 
 ## Android-specific dependencies used in multiple crates in the workspace.
@@ -57,14 +58,14 @@ robius-android-env = "0.2.0"
 block2 = "0.6.1"
 dispatch2 = { version = "0.3.0", default-features = false, features = ["std"] }
 objc2 = "0.6.1"
-objc2-app-kit              = { version = "0.3.1", default-features = false, features = ["alloc"] }
-objc2-foundation           = { version = "0.3.1", default-features = false, features = ["alloc"] }
-objc2-local-authentication = { version = "0.3.1", default-features = false, features = ["alloc"] }
-objc2-ui-kit               = { version = "0.3.1", default-features = false, features = ["alloc"] }
+objc2-app-kit              = { version = "0.3.1", default-features = false, features = ["std"] }
+objc2-core-location        = { version = "0.3.1", default-features = false, features = ["std"] }
+objc2-foundation           = { version = "0.3.1", default-features = false, features = ["std"] }
+objc2-local-authentication = { version = "0.3.1", default-features = false, features = ["std"] }
+objc2-ui-kit               = { version = "0.3.1", default-features = false, features = ["std"] }
 
 
 ## Linux-specific dependencies used in multiple crates in the workspace.
-# [target.'cfg(target_os = "linux")'.workspace.dependencies]
 polkit = "=0.17.0"
 gio = "=0.17.0"
 
