@@ -5,6 +5,7 @@ edition.workspace = true
 authors = [
     "Kevin Boos <kevinaboos@gmail.com>",
     "Klim Tsoutsman <klim@tsoutsman.com>",
+    "Tyrese Luo <tyreseluo@outlook.com>",
     "Project Robius Maintainers",
 ]
 description = "Rust abstractions for multi-platform native authentication: biometrics, fingerprint, password, screen lock, TouchID, FaceID, Windows Hello, etc."
@@ -50,8 +51,10 @@ objc2-foundation = { workspace = true, features = ["NSError", "NSString"] }
 # optional = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-polkit.workspace = true
-gio.workspace = true
+# polkit.workspace = true
+# gio.workspace = true
+zbus.workspace = true
+zbus_polkit = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 retry.workspace = true

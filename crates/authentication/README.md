@@ -30,6 +30,69 @@ To use this crate on Android, you must add the following to your app's `AndroidM
 <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 ```
 
+## Usage on Linux
+
+On Linux, `robius-authentication` uses **polkit** to request authorization via the
+desktop environment's native authentication prompt (GNOME/KDE/etc).
+
+> [!IMPORTANT]
+> **Ensure a polkit agent is running**
+>  
+> The prompt is displayed by a polkit authentication agent (GNOME/KDE usually start one automatically).
+> If no agent is running (headless/SSH), no prompt will appear and auth will fail.
+
+### Add a polkit action policy file
+
+
+#### Development & debugging
+
+During development and debugging, you can simplify the process using the following steps:
+
+1. Place the policy file within the project, for example in resources/com.yourapp.policy.
+
+2. Install it once on your development machine using sudo:
+
+```bash
+sudo install -Dm644 resources/com.yourapp.policy \
+  /usr/share/polkit-1/actions/com.yourapp.policy
+```
+
+3. Verify functionality with pkaction:
+
+```bash
+pkaction --action-id com.yourapp.authenticate --verbose
+```
+
+Log back into your desktop session (or restart polkitd), then run your example.
+
+
+Plicy file example:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<policyconfig>
+  <action id="com.yourapp.authenticate">
+    <description>Authenticate to use YourApp</description>
+    <message>Authentication is required</message>
+    <defaults>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
+````
+#### 
+
+> [!TIP]
+> Automatic addition during runtime is not recommended and should generally be avoided.
+The reason is not technical feasibility, but rather security/distribution policy restrictions:
+> 
+> polkit actions (.policy files) are system-level security policies. By design, they must be written by package managers or administrators during installation. Ordinary applications should not be allowed to modify system security configurations during runtime.
+> 
+> Writing to `/usr/share/...` during runtime requires root privileges; allowing an app to elevate privileges to modify policy files is flagged as a security red flag by many distributions.
+>
+> The only recommended “automatic method” is installation-time automation.
+This means packaging the `.policy` file alongside your deb/rpm/aur/flatpak package during installation.
+
 ## Example
 
 ```rust
@@ -37,7 +100,10 @@ use robius_authentication::{
     AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
 };
 
+// Linux ignores policy options like biometrics/password (kept for parity).
 let policy: Policy = PolicyBuilder::new()
+    // The action ID must match your `.policy`.
+    .action_id("com.yourapp.authenticate") // optional if using default
     .biometrics(Some(BiometricStrength::Strong))
     .password(true)
     .companion(true)
@@ -60,6 +126,7 @@ let callback = |auth_result| {
         Err(_) => log::error!(Authentication failed!"),
     }
 };
+
 
 Context::new(())
     .authenticate(text, &policy, callback)
