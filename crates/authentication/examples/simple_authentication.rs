@@ -2,7 +2,11 @@ use robius_authentication::{
     AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
 };
 
+/// If you're targeting Linux, make sure to set an appropriate action ID
+/// in your policy. This is required for Polkit authentication.
+/// See more README.md (How to use in Linux).
 const POLICY: Policy = PolicyBuilder::new()
+    .action_id("com.yourapp.authenticate")
     .biometrics(Some(BiometricStrength::Strong))
     .password(true)
     .companion(true)

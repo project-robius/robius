@@ -2,7 +2,7 @@
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// An error produced during authentication.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Error {
     // TODO: Reexport jni::errors::Error
     // TODO: Remove target cfg

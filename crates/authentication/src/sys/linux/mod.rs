@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
 use std::thread;
 use zbus::blocking::Connection;
-use zbus_polkit::policykit1::{AuthorityProxyBlocking, CheckAuthorizationFlags, Subject};
+use zbus_polkit::policykit1::{AuthorityProxyBlocking, AuthorizationResult, CheckAuthorizationFlags, Subject};
 
 use crate::{Error, Result, Text};
 
@@ -18,7 +18,7 @@ impl Context {
 
     pub(crate) fn authenticate<F>(
         &self,
-        _message: Text,
+        _message: Text, // _message is unused on Linux, see reasons below:  auth.check_authorization();
         policy: &Policy,
         callback: F,
     ) -> Result<()>
@@ -26,28 +26,57 @@ impl Context {
         F: Fn(Result<()>) + Send + 'static,
     {
         let action_id = policy.action_id;
-
-        thread::spawn(move || {
-            let res = do_polkit_check(action_id);
-            callback(res);
-        });
+        // Here, we perform a simple and direct thread creation because the current calls are infrequent.
+        thread::Builder::new()
+            .name(String::from("robius-authentication-polkit"))
+            .spawn(move || {
+                let res = do_polkit_check(action_id);
+                callback(res);
+            })
+            .map_err(|_| Error::Unavailable)?;
         Ok(())
     }
 }
 
+static SYSTEM_CONNECTION: OnceLock<Result<Connection>> = OnceLock::new(); // Cached system bus connection
+static AUTHORITY_PROXY: OnceLock<Result<AuthorityProxyBlocking<'static>>> = OnceLock::new(); // Cached authority proxy
+
+pub(crate) fn get_system_connection() -> Result<Connection> {
+    let r: &Result<Connection> = SYSTEM_CONNECTION.get_or_init(|| {
+        Connection::system()
+            .map_err(|_| Error::Unavailable)
+    });
+
+    match r {
+        Ok(conn) => Ok(conn.clone()),
+        Err(e) => Err(e.clone()),
+    }
+}
+
+pub(crate) fn get_authority_proxy() -> Result<AuthorityProxyBlocking<'static>> {
+    let r: &Result<AuthorityProxyBlocking<'static>> = AUTHORITY_PROXY.get_or_init(|| {
+        let conn = get_system_connection()?;
+        AuthorityProxyBlocking::new(&conn).map_err(|e| {
+            let _ = e;
+            Error::Unavailable
+        })
+    });
+
+    match r {
+        Ok(p) => Ok(p.clone()),
+        Err(e) => Err(e.clone()),
+    }
+}
+
 fn do_polkit_check(action_id: &'static str) -> Result<()> {
-    // 1) system bus (blocking)
-    let conn = Connection::system().map_err(|_| Error::Unavailable)?;
+    // Get authority proxy, and it's cached for future use.
+    let auth = get_authority_proxy()?;
 
-    // 2) polkit authority proxy (blocking)
-    let auth = AuthorityProxyBlocking::new(&conn).map_err(|_| Error::Unavailable)?;
-
-    // 3) Subject: current process owner
     let pid = std::process::id() as u32;
     let subject = Subject::new_for_owner(pid, None, None)
         .map_err(|_| Error::Unavailable)?;
 
-    // 4) check authorization, allow interaction => system prompt
+    // If details is non-empty then the request will fail with POLKIT_ERROR_FAILED unless the process doing the check itsef is sufficiently authorized (e.g. running as uid 0).
     let result = auth
         .check_authorization(
             &subject,
@@ -58,11 +87,24 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
         )
         .map_err(|e| map_polkit_error(e.to_string()))?;
 
+    map_authorization_result(result)
+}
+
+fn map_authorization_result(result: AuthorizationResult) -> Result<()> {
     if result.is_authorized {
-        Ok(())
-    } else {
-        Err(Error::Authentication)
+        return Ok(());
     }
+
+    if result.details.keys().any(|k| k.contains("dismissed")) {
+        return Err(Error::UserCanceled);
+    }
+
+    if result.is_challenge {
+        // No agent available or UI interaction not possible even though we requested it.
+        return Err(Error::Unavailable);
+    }
+
+    Err(Error::Authentication)
 }
 
 fn map_polkit_error(msg: String) -> Error {
@@ -78,8 +120,6 @@ fn map_polkit_error(msg: String) -> Error {
     }
 }
 
-const DEFAULT_ACTION_ID: &str = "com.yourapp.authenticate";
-
 /// Authentication policy on Linux.
 /// Only action id matters.
 #[derive(Debug, Clone)]
@@ -88,8 +128,8 @@ pub struct Policy {
 }
 
 /// Policy builder for Linux.
-/// polkit doesn't really understand "biometrics/password/companion" flags from mobile,
-/// so we keep them for API consistency but only store an action id.
+/// On Linux, a polkit action id MUST be explicitly provided.
+/// If not set, build() returns None.
 #[derive(Debug, Clone)]
 pub struct PolicyBuilder {
     action_id: Option<&'static str>,
@@ -101,7 +141,7 @@ impl PolicyBuilder {
         Self { action_id: None }
     }
 
-    /// Optional: allow caller to override polkit action id.
+    /// Required on Linux: caller must provide a polkit action id.
     #[inline]
     pub const fn action_id(self, id: &'static str) -> Self {
         Self { action_id: Some(id) }
@@ -109,29 +149,21 @@ impl PolicyBuilder {
 
     // The following are no-ops on Linux but kept for cross-platform API.
     #[inline]
-    pub const fn biometrics(self, _strength: Option<crate::BiometricStrength>) -> Self {
-        self
-    }
+    pub const fn biometrics(self, _strength: Option<crate::BiometricStrength>) -> Self { self }
     #[inline]
-    pub const fn password(self, _password: bool) -> Self {
-        self
-    }
+    pub const fn password(self, _password: bool) -> Self { self }
     #[inline]
-    pub const fn companion(self, _companion: bool) -> Self {
-        self
-    }
+    pub const fn companion(self, _companion: bool) -> Self { self }
     #[inline]
-    pub const fn wrist_detection(self, _wrist: bool) -> Self {
-        self
-    }
+    pub const fn wrist_detection(self, _wrist: bool) -> Self { self }
 
+    /// Cross-platform API requirement: return Option.
+    /// Linux behavior: None if action_id is not explicitly set.
     #[inline]
     pub const fn build(self) -> Option<Policy> {
-        Some(Policy {
-            action_id: match self.action_id {
-                Some(id) => id,
-                None => DEFAULT_ACTION_ID,
-            },
-        })
+        match self.action_id {
+            Some(id) => Some(Policy { action_id: id }),
+            None => None,
+        }
     }
 }

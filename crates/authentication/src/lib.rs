@@ -199,6 +199,16 @@ impl PolicyBuilder {
         }
     }
 
+    #[inline]
+    #[must_use]
+    #[cfg(target_os = "linux")]
+    pub const fn action_id(self, id: &'static str) -> Self {
+        Self {
+            inner: self.inner.action_id(id),
+        }
+    }
+
+
     /// Configures biometric authentication with the given strength.
     ///
     /// The strength only has an effect on Android, see [`BiometricStrength`]
