@@ -51,8 +51,6 @@ objc2-foundation = { workspace = true, features = ["NSError", "NSString"] }
 # optional = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# polkit.workspace = true
-# gio.workspace = true
 zbus.workspace = true
 zbus_polkit = { workspace = true }
 

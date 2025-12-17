@@ -6,7 +6,6 @@ use robius_authentication::{
 /// in your policy. This is required for Polkit authentication.
 /// See more README.md (How to use in Linux).
 const POLICY: Policy = PolicyBuilder::new()
-    .action_id("com.yourapp.authenticate")
     .biometrics(Some(BiometricStrength::Strong))
     .password(true)
     .companion(true)
