@@ -1,0 +1,21 @@
+[package]
+name = "robius-proxy"
+version.workspace = true
+edition.workspace = true
+authors = [
+    "Tyrese Luo <tyreseluo@outlook.com>",
+    "Project Robius Maintainers",
+]
+homepage.workspace = true
+categories.workspace = true
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+
+[dependencies]
+cfg-if.workspace = true
+log = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit    = { workspace = true, features = ["NSWorkspace"] }
+objc2-foundation = { workspace = true, features = ["NSString", "NSURL"] }

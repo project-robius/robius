@@ -761,6 +761,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "robius-proxy"
+version = "0.2.0"
+dependencies = [
+ "cfg-if",
+ "log",
+ "objc2-app-kit",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
