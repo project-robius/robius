@@ -100,7 +100,8 @@ use robius_authentication::{
     AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
 };
 
-// Linux ignores policy options like biometrics/password (kept for parity).
+// Linux ignores policy options like biometrics/password,
+// but it's best to keep them in for proper operation on other platforms.
 let policy: Policy = PolicyBuilder::new()
     // The action ID must match your `.policy`.
     .action_id("com.yourapp.authenticate") // optional if using default
