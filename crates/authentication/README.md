@@ -66,7 +66,7 @@ pkaction --action-id com.yourapp.authenticate --verbose
 Log back into your desktop session (or restart polkitd), then run your example.
 
 
-Plicy file example:
+Policy file example:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
