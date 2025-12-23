@@ -69,7 +69,7 @@ pub(crate) fn get_authority_proxy() -> Result<AuthorityProxyBlocking<'static>> {
 }
 
 fn do_polkit_check(action_id: &'static str) -> Result<()> {
-    // Get authority proxy, and it's cached for future use.
+    // Get authority proxy (and cache it for future usage).
     let auth = get_authority_proxy()?;
 
     let pid = std::process::id() as u32;
