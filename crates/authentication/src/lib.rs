@@ -141,6 +141,8 @@ impl Context {
     /// with a Result indicating whether authentication succeeded.
     /// Note that the callback may be not be called at all,
     /// but will always be called upon success.
+    /// 
+    /// On Linux: message is unused.
     ///
     /// Thus, authentication failed if this function returns an error
     /// **OR** if the `callback` is invoked with `Err(_)`.

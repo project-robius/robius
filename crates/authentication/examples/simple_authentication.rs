@@ -2,7 +2,11 @@ use robius_authentication::{
     AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
 };
 
+/// If you want to run this simple demo on linux, please ensure policy file installed correctly 
+/// and to setting your action id by .action_id(<YOUR_POLICY_SETTING_ACTION_ID>)
+///s See: README file `Usage on Linux` section.
 const POLICY: Policy = PolicyBuilder::new()
+    .action_id("org.robius.authentication")
     .biometrics(Some(BiometricStrength::Strong))
     .password(true)
     .companion(true)

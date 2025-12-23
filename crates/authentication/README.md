@@ -41,99 +41,29 @@ desktop environment's native authentication prompt (GNOME/KDE/etc).
 > The prompt is displayed by a polkit authentication agent (GNOME/KDE usually start one automatically).
 > If no agent is running (headless/SSH), no prompt will appear and auth will fail.
 
-### Add a polkit action policy file
+### Write policy file.
 
-#### Development & debugging
+You can crate your own application's policy file, also can crate by template policy file.
 
-During development and debugging, you can simplify the process using the following steps:
+Template policy file see: [`./examples/org.robius.authentication.policy`](./examples/org.robius.authentication.policy)
 
-1. Place the policy file within the project, for example in resources/com.yourapp.policy.
+### Quick Test Mode ⚠️
 
-2. Install it once on your development machine using sudo:
-
-```bash
-sudo install -Dm644 resources/com.yourapp.policy \
-  /usr/share/polkit-1/actions/com.yourapp.policy
-```
-
-3. Verify functionality with pkaction:
+Add the policy file to actions by manually executing the following command:
 
 ```bash
-pkaction --action-id com.yourapp.authenticate --verbose
+sudo install -Dm644 com.yourapp.policy /usr/share/polkit-1/actions/
 ```
 
-Log back into your desktop session (or restart polkitd), then run your example.
+Then, ensure your policy file is correctly installed.
 
+```bash
+pkaction --action-id <YOUR_POLICY_File_ACTION_ID>
+```
 
-Policy file example:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<policyconfig>
-  <action id="com.yourapp.authenticate">
-    <description>Authenticate to use YourApp</description>
-    <message>Authentication is required</message>
-    <defaults>
-      <allow_active>auth_admin_keep</allow_active>
-    </defaults>
-  </action>
-</policyconfig>
-````
-#### 
-
-> [!TIP]
-> Automatic addition during runtime is not recommended and should generally be avoided.
-The reason is not technical feasibility, but rather security/distribution policy restrictions:
-> 
-> polkit actions (.policy files) are system-level security policies. By design, they must be written by package managers or administrators during installation. Ordinary applications should not be allowed to modify system security configurations during runtime.
-> 
-> Writing to `/usr/share/...` during runtime requires root privileges; allowing an app to elevate privileges to modify policy files is flagged as a security red flag by many distributions.
+> During the test mode, you don't need to worry about the location of the policy file; just ensure it installs correctly.
 >
-> The only recommended “automatic method” is installation-time automation.
-This means packaging the `.policy` file alongside your deb/rpm/aur/flatpak package during installation.
-
-## Example
-
-```rust
-use robius_authentication::{
-    AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
-};
-
-// Linux ignores policy options like biometrics/password,
-// but it's best to keep them in for proper operation on other platforms.
-let policy: Policy = PolicyBuilder::new()
-    // The action ID must match your `.policy`.
-    .action_id("com.yourapp.authenticate") // optional if using default
-    .biometrics(Some(BiometricStrength::Strong))
-    .password(true)
-    .companion(true)
-    .build()
-    .unwrap();
-
-let text = Text {
-    android: AndroidText {
-        title: "Title",
-        subtitle: None,
-        description: None,
-    },
-    apple: "authenticate",
-    windows: WindowsText::new("Title", "Description"),
-};
-
-let callback = |auth_result| {
-    match auth_result {
-        Ok(_)  => log::info!("Authentication success!"),
-        Err(_) => log::error!(Authentication failed!"),
-    }
-};
+> You can also store it in advance under the unified packaging configuration folder (like `packaging`)to facilitate automatic installation of the policy file during release mode when users perform installation.
 
 
-Context::new(())
-    .authenticate(text, &policy, callback)
-    .expect("Authentication failed");
-```
-
-For more details about the prompt text, see the `Text` struct,
-which allows you to customize the prompt for each platform.
-
-[`polkit`]: https://www.freedesktop.org/software/polkit/docs/latest/polkit.8.html
+### Release Mode

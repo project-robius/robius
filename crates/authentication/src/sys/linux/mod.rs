@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::OnceLock};
-use std::thread;
-use zbus::blocking::Connection;
+use zbus::{blocking::Connection, fdo, Error as ZbusError};
 use zbus_polkit::policykit1::{AuthorityProxyBlocking, AuthorizationResult, CheckAuthorizationFlags, Subject};
 
 use crate::{Error, Result, Text};
@@ -18,7 +17,7 @@ impl Context {
 
     pub(crate) fn authenticate<F>(
         &self,
-        _message: Text, // _message is unused on Linux, see reasons below:  auth.check_authorization();
+        _message: Text,
         policy: &Policy,
         callback: F,
     ) -> Result<()>
@@ -26,14 +25,8 @@ impl Context {
         F: Fn(Result<()>) + Send + 'static,
     {
         let action_id = policy.action_id;
-        // Here, we perform a simple and direct thread creation because the current calls are infrequent.
-        thread::Builder::new()
-            .name(String::from("robius-authentication-polkit"))
-            .spawn(move || {
-                let res = do_polkit_check(action_id);
-                callback(res);
-            })
-            .map_err(|_| Error::Unavailable)?;
+        let res = do_polkit_check(action_id);
+        callback(res);
         Ok(())
     }
 }
@@ -76,16 +69,34 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
     let subject = Subject::new_for_owner(pid, None, None)
         .map_err(|_| Error::Unavailable)?;
 
+    let mut details = HashMap::new();
+    details.insert("polkit.message", "Hello");
+
+
     // If details is non-empty then the request will fail with POLKIT_ERROR_FAILED unless the process doing the check itsef is sufficiently authorized (e.g. running as uid 0).
-    let result = auth
+    let result: AuthorizationResult = auth
         .check_authorization(
             &subject,
             action_id,
-            &HashMap::new(), 
+            &details,
             CheckAuthorizationFlags::AllowUserInteraction.into(),
             "",
         )
-        .map_err(|e| map_polkit_error(e.to_string()))?;
+        .map_err(|err| match err {
+            ZbusError::MethodError(name, _, _) => match name.as_str() {
+                "org.freedesktop.PolicyKit1.Error.Cancelled" => Error::UserCanceled,
+                "org.freedesktop.PolicyKit1.Error.NotAuthorized" => Error::Authentication,
+                "org.freedesktop.PolicyKit1.Error.NotSupported" => Error::Unavailable,
+                "org.freedesktop.PolicyKit1.Error.NoAgent" => Error::Unavailable,
+                _ => Error::Authentication,
+            },
+            ZbusError::FDO(fdo_err) => match *fdo_err {
+                fdo::Error::TimedOut(_) | fdo::Error::NoReply(_) => Error::Unavailable,
+                _ => Error::Authentication,
+            },
+            ZbusError::InputOutput(_) => Error::Unavailable,
+            _ => Error::Authentication,
+        })?;
 
     if result.is_authorized {
         return Ok(());
@@ -101,19 +112,6 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
     }
 
     Err(Error::Authentication)
-}
-
-fn map_polkit_error(msg: String) -> Error {
-    let m = msg.to_lowercase();
-    if m.contains("cancel") || m.contains("canceled") || m.contains("cancelled") {
-        Error::UserCanceled
-    } else if m.contains("locked") || m.contains("exhaust") || m.contains("too many") {
-        Error::Exhausted
-    } else if m.contains("unavailable") || m.contains("no agent") || m.contains("not supported") {
-        Error::Unavailable
-    } else {
-        Error::Authentication
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -132,7 +130,6 @@ impl PolicyBuilder {
         Self { action_id: None }
     }
 
-    /// Required on Linux: caller must provide a polkit action id.
     #[inline]
     pub const fn action_id(self, id: &'static str) -> Self {
         Self { action_id: Some(id) }
@@ -152,7 +149,7 @@ impl PolicyBuilder {
     pub const fn build(self) -> Option<Policy> {
         match self.action_id {
             Some(id) => Some(Policy { action_id: id }),
-            None => None,
+            None => Some(Policy { action_id: "Use" }),
         }
     }
 }
