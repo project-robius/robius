@@ -178,6 +178,9 @@ pub enum BiometricStrength {
 /// when being requested to enable/disable various authentication methods.
 /// Enabling all options is the safest way to ensure that the authentication prompt
 /// will be displayed correctly on all platforms.
+///
+/// On Linux, a polkit action id MUST be explicitly provided.
+/// If not set, build() returns None. None if action_id is not explicitly set.
 #[derive(Debug)]
 pub struct PolicyBuilder {
     inner: sys::PolicyBuilder,

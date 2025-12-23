@@ -87,10 +87,6 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
         )
         .map_err(|e| map_polkit_error(e.to_string()))?;
 
-    map_authorization_result(result)
-}
-
-fn map_authorization_result(result: AuthorizationResult) -> Result<()> {
     if result.is_authorized {
         return Ok(());
     }
@@ -120,16 +116,11 @@ fn map_polkit_error(msg: String) -> Error {
     }
 }
 
-/// Authentication policy on Linux.
-/// Only action id matters.
 #[derive(Debug, Clone)]
 pub struct Policy {
     pub(crate) action_id: &'static str,
 }
 
-/// Policy builder for Linux.
-/// On Linux, a polkit action id MUST be explicitly provided.
-/// If not set, build() returns None.
 #[derive(Debug, Clone)]
 pub struct PolicyBuilder {
     action_id: Option<&'static str>,
@@ -157,8 +148,6 @@ impl PolicyBuilder {
     #[inline]
     pub const fn wrist_detection(self, _: bool) -> Self { self }
 
-    /// Cross-platform API requirement: return Option.
-    /// Linux behavior: None if action_id is not explicitly set.
     #[inline]
     pub const fn build(self) -> Option<Policy> {
         match self.action_id {
