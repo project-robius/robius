@@ -149,13 +149,13 @@ impl PolicyBuilder {
 
     // The following are no-ops on Linux but kept for cross-platform API.
     #[inline]
-    pub const fn biometrics(self, _strength: Option<crate::BiometricStrength>) -> Self { self }
+    pub const fn biometrics(self, _: Option<crate::BiometricStrength>) -> Self { self }
     #[inline]
-    pub const fn password(self, _password: bool) -> Self { self }
+    pub const fn password(self, _: bool) -> Self { self }
     #[inline]
-    pub const fn companion(self, _companion: bool) -> Self { self }
+    pub const fn companion(self, _: bool) -> Self { self }
     #[inline]
-    pub const fn wrist_detection(self, _wrist: bool) -> Self { self }
+    pub const fn wrist_detection(self, _: bool) -> Self { self }
 
     /// Cross-platform API requirement: return Option.
     /// Linux behavior: None if action_id is not explicitly set.

@@ -199,9 +199,17 @@ impl PolicyBuilder {
         }
     }
 
+    /// Sets the identifier of the action that requires authorization.
+    ///
+    /// On Linux systems, this typically maps to a polkit `action_id`, which
+    /// represents a specific privileged operation (such as modifying system
+    /// settings or powering off the device). The authentication backend uses
+    /// this identifier to determine whether the action is permitted and whether
+    /// user authentication is required.
+    ///
+    /// This only has an effect on linux.
     #[inline]
     #[must_use]
-    #[cfg(target_os = "linux")]
     pub const fn action_id(self, id: &'static str) -> Self {
         Self {
             inner: self.inner.action_id(id),

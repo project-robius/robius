@@ -53,6 +53,10 @@ impl PolicyBuilder {
         Self
     }
 
+    pub(crate) const fn action_id(self, _: &'static str) -> Self {
+        self
+    }
+
     pub(crate) const fn build(self) -> Option<Policy> {
         None
     }

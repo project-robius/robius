@@ -127,6 +127,10 @@ impl PolicyBuilder {
         self
     }
 
+    pub(crate) const fn action_id(self, _: &'static str) -> Self {
+        self
+    }
+
     pub(crate) const fn build(self) -> Option<Policy> {
         if let Some(strength) = self.biometrics {
             return Some(Policy {

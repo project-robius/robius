@@ -37,12 +37,11 @@ desktop environment's native authentication prompt (GNOME/KDE/etc).
 
 > [!IMPORTANT]
 > **Ensure a polkit agent is running**
->  
+>
 > The prompt is displayed by a polkit authentication agent (GNOME/KDE usually start one automatically).
 > If no agent is running (headless/SSH), no prompt will appear and auth will fail.
 
 ### Add a polkit action policy file
-
 
 #### Development & debugging
 
