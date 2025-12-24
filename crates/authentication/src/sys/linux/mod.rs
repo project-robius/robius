@@ -25,8 +25,16 @@ impl Context {
         F: Fn(Result<()>) + Send + 'static,
     {
         let action_id = policy.action_id;
-        let res = do_polkit_check(action_id);
-        callback(res);
+        // CheckAuthorization may block (D-Bus round-trips and potential user interaction).
+        // Run it off the caller thread to avoid blocking UI/event-loop threads.
+        std::thread::Builder::new()
+            .name("robius-authentication-polkit".into())
+            .spawn(move || {
+                let res = do_polkit_check(action_id);
+                callback(res);
+            })
+            .map_err(|_| Error::Unavailable)?;
+
         Ok(())
     }
 }
@@ -65,20 +73,17 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
     // Get authority proxy (and cache it for future usage).
     let auth = get_authority_proxy()?;
 
-    let pid = std::process::id() as u32;
-    let subject = Subject::new_for_owner(pid, None, None)
+    // Use a unix-process subject including pid start-time and real uid.
+    // This avoids pid reuse ambiguity and matches polkit's recommended subject format.
+    let subject = Subject::new_for_owner(std::process::id(), None, None)
         .map_err(|_| Error::Unavailable)?;
-
-    let mut details = HashMap::new();
-    details.insert("polkit.message", "Hello");
-
 
     // If details is non-empty then the request will fail with POLKIT_ERROR_FAILED unless the process doing the check itsef is sufficiently authorized (e.g. running as uid 0).
     let result: AuthorizationResult = auth
         .check_authorization(
             &subject,
             action_id,
-            &details,
+            &HashMap::new(),
             CheckAuthorizationFlags::AllowUserInteraction.into(),
             "",
         )
@@ -102,7 +107,12 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
         return Ok(());
     }
 
-    if result.details.keys().any(|k| k.contains("dismissed")) {
+    if result
+        .details
+        .get("polkit.dismissed")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+    {
         return Err(Error::UserCanceled);
     }
 
@@ -149,7 +159,7 @@ impl PolicyBuilder {
     pub const fn build(self) -> Option<Policy> {
         match self.action_id {
             Some(id) => Some(Policy { action_id: id }),
-            None => Some(Policy { action_id: "Use" }),
+            None => None,
         }
     }
 }
