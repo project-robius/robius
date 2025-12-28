@@ -34,7 +34,6 @@ impl Context {
                 callback(res);
             })
             .map_err(|_| Error::Unavailable)?;
-
         Ok(())
     }
 }
@@ -57,10 +56,7 @@ pub(crate) fn get_system_connection() -> Result<Connection> {
 pub(crate) fn get_authority_proxy() -> Result<AuthorityProxyBlocking<'static>> {
     let r: &Result<AuthorityProxyBlocking<'static>> = AUTHORITY_PROXY.get_or_init(|| {
         let conn = get_system_connection()?;
-        AuthorityProxyBlocking::new(&conn).map_err(|e| {
-            let _ = e;
-            Error::Unavailable
-        })
+        AuthorityProxyBlocking::new(&conn).map_err(|_| Error::Unavailable)
     });
 
     match r {
@@ -72,35 +68,40 @@ pub(crate) fn get_authority_proxy() -> Result<AuthorityProxyBlocking<'static>> {
 fn do_polkit_check(action_id: &'static str) -> Result<()> {
     // Get authority proxy (and cache it for future usage).
     let auth = get_authority_proxy()?;
+    let details = HashMap::new();
 
     // Use a unix-process subject including pid start-time and real uid.
     // This avoids pid reuse ambiguity and matches polkit's recommended subject format.
     let subject = Subject::new_for_owner(std::process::id(), None, None)
         .map_err(|_| Error::Unavailable)?;
 
-    // If details is non-empty then the request will fail with POLKIT_ERROR_FAILED unless the process doing the check itsef is sufficiently authorized (e.g. running as uid 0).
+    // If details is non-empty then the request will fail with POLKIT_ERROR_FAILED
+    // unless the process doing the check itsef is sufficiently authorized (e.g. running as uid 0).
     let result: AuthorizationResult = auth
         .check_authorization(
             &subject,
             action_id,
-            &HashMap::new(),
+            &details,
             CheckAuthorizationFlags::AllowUserInteraction.into(),
             "",
         )
-        .map_err(|err| match err {
-            ZbusError::MethodError(name, _, _) => match name.as_str() {
-                "org.freedesktop.PolicyKit1.Error.Cancelled" => Error::UserCanceled,
-                "org.freedesktop.PolicyKit1.Error.NotAuthorized" => Error::Authentication,
-                "org.freedesktop.PolicyKit1.Error.NotSupported" => Error::Unavailable,
-                "org.freedesktop.PolicyKit1.Error.NoAgent" => Error::Unavailable,
+        .map_err(|err| {
+            eprintln!("polkit check_authorization error: {:?}", err);
+            match err {
+                ZbusError::MethodError(name, _, _) => match name.as_str() {
+                    "org.freedesktop.PolicyKit1.Error.Cancelled" => Error::UserCanceled,
+                    "org.freedesktop.PolicyKit1.Error.NotAuthorized" => Error::Authentication,
+                    "org.freedesktop.PolicyKit1.Error.NotSupported" => Error::Unavailable,
+                    "org.freedesktop.PolicyKit1.Error.NoAgent" => Error::Unavailable,
+                    _ => Error::Authentication,
+                },
+                ZbusError::FDO(fdo_err) => match *fdo_err {
+                    fdo::Error::TimedOut(_) | fdo::Error::NoReply(_) => Error::Unavailable,
+                    _ => Error::Authentication,
+                },
+                ZbusError::InputOutput(_) => Error::Unavailable,
                 _ => Error::Authentication,
-            },
-            ZbusError::FDO(fdo_err) => match *fdo_err {
-                fdo::Error::TimedOut(_) | fdo::Error::NoReply(_) => Error::Unavailable,
-                _ => Error::Authentication,
-            },
-            ZbusError::InputOutput(_) => Error::Unavailable,
-            _ => Error::Authentication,
+            }
         })?;
 
     if result.is_authorized {
@@ -116,21 +117,19 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
         return Err(Error::UserCanceled);
     }
 
-    if result.is_challenge {
-        // No agent available or UI interaction not possible even though we requested it.
-        return Err(Error::Unavailable);
-    }
 
+    // If we're not authorized, treat as authentication failure.
+    // "NoAgent" is handled as an error (org.freedesktop.PolicyKit1.Error.NoAgent).
     Err(Error::Authentication)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Policy {
     pub(crate) action_id: &'static str,
 }
 
-#[derive(Debug, Clone)]
-pub struct PolicyBuilder {
+#[derive(Debug)]
+pub(crate) struct PolicyBuilder {
     action_id: Option<&'static str>,
 }
 

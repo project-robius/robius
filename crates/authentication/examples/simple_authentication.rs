@@ -1,11 +1,44 @@
+//! # Recommended usage
+//!
+//! `Context::authenticate()` is asynchronous: it returns immediately after *starting*
+//! authentication and delivers the final result via the callback.
+//!
+//! **In GUI applications**, you typically do not need any additional synchronization.
+//! The application's event loop keeps the process alive while the user interacts with
+//! the authentication prompt.
+//!
+//! ```no_run
+//! let context = Context::new(());
+//! context.authenticate(TEXT, &POLICY, |result| {
+//!     match result {
+//!         Ok(()) => println!("Authentication successful"),
+//!         Err(e) => eprintln!("Authentication failed: {:?}", e),
+//!     }
+//! });
+//! ```
+//!
+//! # Why this example uses `mpsc::channel()`
+//!
+//! This file is a CLI-style demo. Without an event loop, `main()` would exit before the
+//! authentication completes (especially on Linux where the polkit check runs in the
+//! background). We therefore use an `mpsc::channel()` to wait for the callback.
+//!
+//! # Linux notes
+//!
+//! - Ensure the polkit policy file is installed for the chosen `action_id`
+//!   (see README: "Usage on Linux").
+//! - Ensure a polkit authentication agent is running in the current desktop session,
+//!   otherwise no prompt will appear and the request will fail with `NoAgent`/`Unavailable`.
+
+use std::sync::mpsc;
+
 use robius_authentication::{
     AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
 };
 
-/// If you want to run this simple demo on linux, please ensure policy file installed correctly 
-/// and to setting your action id by .action_id(<YOUR_POLICY_SETTING_ACTION_ID>)
-///s See: README file `Usage on Linux` section.
 const POLICY: Policy = PolicyBuilder::new()
+    // On Linux You need to setting action_id
+    // See: ./org.robius.authentication.policy file settings and (README: "Usage on Linux").
     .action_id("org.robius.authentication")
     .biometrics(Some(BiometricStrength::Strong))
     .password(true)
@@ -26,19 +59,23 @@ const TEXT: Text = Text {
 fn main() {
     let context = Context::new(());
 
-    let res = context.authenticate(
-        TEXT,
-        &POLICY,
-        |result| match result {
-            Ok(_) => println!("Authentication successful"),
-            Err(e) => println!("Authentication failed: {:?}", e),
-        },
-    );
-    
-    // Note: if `res` is `Ok`, the authentication did not necessarily succeed. 
-    // The callback will be called with the result of the authentication.
-    // If `res` is `Err`, it indicates an error in the authentication policy or context setup.
+    let (tx, rx) = mpsc::channel();
+
+    // Start authentication. `res` only indicates whether the request was successfully
+    // initiated; the final result is delivered via the callback.
+    let res = context.authenticate(TEXT, &POLICY, move |result| {
+        let _ = tx.send(result);
+    });
+
     if let Err(e) = res {
-        eprintln!("Authentication failed: {:?}", e);
+        eprintln!("Failed to start authentication: {:?}", e);
+        return;
+    }
+
+    // Block until the callback produces a result.
+    match rx.recv() {
+        Ok(Ok(_)) => println!("Authentication successful"),
+        Ok(Err(e)) => println!("Authentication failed: {:?}", e),
+        Err(e) => eprintln!("Failed to receive auth result: {:?}", e),
     }
 }

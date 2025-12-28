@@ -67,3 +67,26 @@ pkaction --action-id <YOUR_POLICY_File_ACTION_ID>
 
 
 ### Release Mode
+
+> The official polkit documentation explicitly states: Mechanisms should install action XML files to [/usr/share/polkit-1/actions](https://www.freedesktop.org/software/polkit/docs/latest/polkit.8.html).
+
+
+As long as your packaging tool provides the capability to automatically install *.policy files under /usr/share/polkit-1/actions/.
+
+See the example below for use `cargo-packager`.
+
+
+#### Use `cargo-packager`
+
+```toml
+# https://docs.crabnebula.dev/packager/configuration/#debianconfig
+[package.metadata.packager.deb]
+depends = "./dist/depends_deb.txt"
+desktop_template = "./packaging/robrix.desktop"
+section = "utils"
+
+[package.metadata.packager.deb.files]
+"./packaging/org.robius.authentication.policy" = "/usr/share/polkit-1/actions/org.robius.authentication.policy"
+```
+
+When you are packaging, `cargo-packager` automatically installs files to their target direactory.
