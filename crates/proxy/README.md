@@ -16,6 +16,7 @@ let manager = ProxyManager::new()?;
 let current = manager.current()?;
 
 println!("Current mode: {:?}", current.mode);
+println!("Proxy enabled: {}", current.is_enabled());
 
 let state = ProxyState::manual(ProxySettings {
     http: Some(ProxyEndpoint::new("proxy.local", 8080)),

@@ -131,6 +131,11 @@ impl ProxyState {
             mode: ProxyMode::AutoDiscovery { bypass },
         }
     }
+
+    /// Returns true when any proxy mode is enabled (manual/PAC/WPAD).
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self.mode, ProxyMode::Direct)
+    }
 }
 
 /// Entry point for interacting with system proxy settings.

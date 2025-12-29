@@ -3,9 +3,14 @@ use robius_proxy::{ProxyManager, ProxyMode, ProxyState};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manager = ProxyManager::new()?;
     let state = manager.current()?;
+    let is_enabled = state.is_enabled();
 
-    println!("Current proxy configuration:");
-    print_state(&state);
+    println!("Proxy enabled => {}", is_enabled);
+
+    if is_enabled {
+        println!("========= Current proxy configuration =========");
+        print_state(&state);
+    }
 
     Ok(())
 }
