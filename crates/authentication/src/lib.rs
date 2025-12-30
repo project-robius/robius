@@ -141,7 +141,7 @@ impl Context {
     /// with a Result indicating whether authentication succeeded.
     /// Note that the callback may be not be called at all,
     /// but will always be called upon success.
-    /// 
+    ///
     /// On Linux: message is unused.
     ///
     /// Thus, authentication failed if this function returns an error
@@ -181,8 +181,8 @@ pub enum BiometricStrength {
 /// Enabling all options is the safest way to ensure that the authentication prompt
 /// will be displayed correctly on all platforms.
 ///
-/// On Linux, a polkit action id MUST be explicitly provided.
-/// If not set, build() returns None. None if action_id is not explicitly set.
+/// On Linux, a polkit action ID *MUST* be explicitly provided.
+/// If not set, `build()` will return None.
 #[derive(Debug)]
 pub struct PolicyBuilder {
     inner: sys::PolicyBuilder,

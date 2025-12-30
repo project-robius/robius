@@ -43,28 +43,37 @@ desktop environment's native authentication prompt (GNOME/KDE/etc).
 
 ### Write policy file.
 
-You can crate your own application's policy file, also can crate by template policy file.
+You can create your application's own policy file from scratch, or also create one from a template policy file.
 
-Template policy file see: [`./examples/org.robius.authentication.policy`](./examples/org.robius.authentication.policy)
+See here for an example template policy file: [`./examples/org.robius.authentication.policy`](./examples/org.robius.authentication.policy)
+
+> [!NOTE]
+>
+> A polkit policy file (`*.policy`) is an XML file that defines one or more authorization **actions** for your application.
+polkit uses these definitions to determine whether a user is allowed to perform privileged operations.
+>
+> The “actions” directory (/usr/share/polkit-1/actions/) contains .policy files that define polkit authorization actions.
 
 ### Quick Test Mode ⚠️
 
-Add the policy file to actions by manually executing the following command:
+#### Step 1. Install your policy file (`*.policy`)
+
+Install the policy file into the polkit `actions` directory, which is used to define authorization actions for the application.
+
+Manually execute the following command:
 
 ```bash
 sudo install -Dm644 com.yourapp.policy /usr/share/polkit-1/actions/
 ```
+`polkit` loads policy definitions from /usr/share/polkit-1/actions/.
 
-Then, ensure your policy file is correctly installed.
+#### Step 2. Ensure your policy file was correctly installed.
 
 ```bash
 pkaction --action-id <YOUR_POLICY_File_ACTION_ID>
 ```
 
 > During the test mode, you don't need to worry about the location of the policy file; just ensure it installs correctly.
->
-> You can also store it in advance under the unified packaging configuration folder (like `packaging`)to facilitate automatic installation of the policy file during release mode when users perform installation.
-
 
 ### Release Mode
 
@@ -73,8 +82,9 @@ pkaction --action-id <YOUR_POLICY_File_ACTION_ID>
 
 As long as your packaging tool provides the capability to automatically install *.policy files under /usr/share/polkit-1/actions/.
 
-See the example below for use `cargo-packager`.
+This document provides example for when you are using `cargo-packager`.
 
+See the example below for use `cargo-packager`.
 
 #### Use `cargo-packager`
 

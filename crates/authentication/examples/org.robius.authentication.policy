@@ -8,7 +8,7 @@
   <icon_name>Your icon name</icon_name>
 
   <!-- ⚠️ Replace action id -->
-  <action id="org.robius.authentication"> 
+  <action id="org.robius.authentication">
     <description>Authenticate to use YourApp</description>
     <!-- The main authentication message -->
     <message>Authentication is required</message>
