@@ -132,7 +132,13 @@ impl Context {
     /// Note that the callback may be not be called at all,
     /// but will always be called upon success.
     ///
-    /// On Linux: message is unused.
+    /// On Linux: `message` is unused because polkit looks up the prompt text from the
+    /// action definition in the installed `.policy` file (its `<message>`/`<description>`).
+    /// The client only supplies an action ID to `CheckAuthorization`, and there is no
+    /// stable, cross-agent way to override that UI text at runtime.
+    /// If you need multiple prompt strings, define multiple actions in the policy file
+    /// and select the desired one via `PolicyBuilder::action_ids` and
+    /// `Policy::set_action_id` before each authentication.
     ///
     /// Thus, authentication failed if this function returns an error
     /// **OR** if the `callback` is invoked with `Err(_)`.
