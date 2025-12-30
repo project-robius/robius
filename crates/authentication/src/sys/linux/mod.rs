@@ -24,13 +24,13 @@ impl Context {
     where
         F: Fn(Result<()>) + Send + 'static,
     {
-        let action_id = policy.action_id;
+        let action_id = policy.action_id.clone();
         // CheckAuthorization may block (D-Bus round-trips and potential user interaction).
         // Run it off the caller thread to avoid blocking UI/event-loop threads.
         std::thread::Builder::new()
             .name("robius-authentication-polkit".into())
             .spawn(move || {
-                let res = do_polkit_check(action_id);
+                let res = do_polkit_check(&action_id);
                 callback(res);
             })
             .map_err(|_| Error::Unavailable)?;
@@ -65,7 +65,7 @@ pub(crate) fn get_authority_proxy() -> Result<AuthorityProxyBlocking<'static>> {
     }
 }
 
-fn do_polkit_check(action_id: &'static str) -> Result<()> {
+fn do_polkit_check(action_id: &str) -> Result<()> {
     // Get authority proxy (and cache it for future usage).
     let auth = get_authority_proxy()?;
     let details = HashMap::new();
@@ -125,23 +125,36 @@ fn do_polkit_check(action_id: &'static str) -> Result<()> {
 
 #[derive(Debug)]
 pub struct Policy {
-    pub(crate) action_id: &'static str,
+    pub(crate) action_id: String,
+    allowed_action_ids: Vec<String>,
+}
+
+impl Policy {
+    #[inline]
+    pub(crate) fn set_action_id(&mut self, id: String) -> Result<()> {
+        if self.allowed_action_ids.iter().any(|allowed| allowed == &id) {
+            self.action_id = id;
+            Ok(())
+        } else {
+            Err(Error::InvalidActionId)
+        }
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct PolicyBuilder {
-    action_id: Option<&'static str>,
+    action_ids: Option<Vec<String>>,
 }
 
 impl PolicyBuilder {
     #[inline]
     pub const fn new() -> Self {
-        Self { action_id: None }
+        Self { action_ids: None }
     }
 
     #[inline]
-    pub const fn action_id(self, id: &'static str) -> Self {
-        Self { action_id: Some(id) }
+    pub fn action_ids(self, ids: Vec<String>) -> Self {
+        Self { action_ids: Some(ids) }
     }
 
     // The following are no-ops on Linux but kept for cross-platform API.
@@ -155,10 +168,15 @@ impl PolicyBuilder {
     pub const fn wrist_detection(self, _: bool) -> Self { self }
 
     #[inline]
-    pub const fn build(self) -> Option<Policy> {
-        match self.action_id {
-            Some(id) => Some(Policy { action_id: id }),
-            None => None,
+    pub fn build(self) -> Option<Policy> {
+        let action_ids = self.action_ids?;
+        if action_ids.is_empty() {
+            return None;
         }
+        let action_id = action_ids[0].clone();
+        Some(Policy {
+            action_id,
+            allowed_action_ids: action_ids,
+        })
     }
 }

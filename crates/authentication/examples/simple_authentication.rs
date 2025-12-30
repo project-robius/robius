@@ -33,18 +33,8 @@
 use std::sync::mpsc;
 
 use robius_authentication::{
-    AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
+    AndroidText, BiometricStrength, Context, PolicyBuilder, Text, WindowsText,
 };
-
-const POLICY: Policy = PolicyBuilder::new()
-    // On Linux You need to setting action_id
-    // See: ./org.robius.authentication.policy file settings and (README: "Usage on Linux").
-    .action_id("org.robius.authentication")
-    .biometrics(Some(BiometricStrength::Strong))
-    .password(true)
-    .companion(true)
-    .build()
-    .unwrap();
 
 const TEXT: Text = Text {
     android: AndroidText {
@@ -58,12 +48,29 @@ const TEXT: Text = Text {
 
 fn main() {
     let context = Context::new(());
+    let mut policy = PolicyBuilder::new()
+        // On Linux You need to set action_ids.
+        // See: ./org.robius.authentication.policy file settings and (README: "Usage on Linux").
+        .action_ids([
+            "org.robius.authentication",
+            "org.robius.authentication.settings",
+        ])
+        .biometrics(Some(BiometricStrength::Strong))
+        .password(true)
+        .companion(true)
+        .build()
+        .unwrap();
+
+    if let Err(e) = policy.set_action_id("org.robius.authentication.settings") {
+        eprintln!("Invalid action_id: {:?}", e);
+        return;
+    }
 
     let (tx, rx) = mpsc::channel();
 
     // Start authentication. `res` only indicates whether the request was successfully
     // initiated; the final result is delivered via the callback.
-    let res = context.authenticate(TEXT, &POLICY, move |result| {
+    let res = context.authenticate(TEXT, &policy, move |result| {
         let _ = tx.send(result);
     });
 

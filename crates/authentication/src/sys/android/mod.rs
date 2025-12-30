@@ -97,6 +97,13 @@ pub(crate) struct Policy {
     password: bool,
 }
 
+impl Policy {
+    #[inline]
+    pub(crate) fn set_action_id(&mut self, _: String) -> Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct PolicyBuilder {
     biometrics: Option<BiometricStrength>,
@@ -127,7 +134,7 @@ impl PolicyBuilder {
         self
     }
 
-    pub(crate) const fn action_id(self, _: &'static str) -> Self {
+    pub(crate) fn action_ids(self, _: Vec<String>) -> Self {
         self
     }
 

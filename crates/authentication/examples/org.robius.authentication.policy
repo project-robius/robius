@@ -1,5 +1,5 @@
-<!-- Template Policy File -->
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Template Policy File -->
 <policyconfig>
   <!-- Optional metadata. Some agents use these for display. -->
   <vendor>Your vendor name</vendor>
@@ -21,4 +21,17 @@
       <allow_active>auth_admin</allow_active>
     </defaults>
   </action>
+
+  <!-- ⚠️ Replace action id -->
+  <action id="org.robius.authentication.settings">
+    <description>Authenticate to change settings</description>
+    <message>Authentication is required to change settings.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <!-- Define your more actions -->
 </policyconfig>

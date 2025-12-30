@@ -19,6 +19,8 @@ pub enum Error {
     Unavailable,
     /// The user canceled authentication.
     UserCanceled,
+    /// The provided action ID is not in the policy's allowed list.
+    InvalidActionId,
 
     // Apple-specific errors
     /// The app canceled authentication.
