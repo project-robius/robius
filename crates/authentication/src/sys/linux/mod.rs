@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::OnceLock};
+use std::collections::HashMap;
 use zbus::{blocking::Connection, fdo, Error as ZbusError};
 use zbus_polkit::policykit1::{AuthorityProxyBlocking, AuthorizationResult, CheckAuthorizationFlags, Subject};
 
@@ -38,36 +38,21 @@ impl Context {
     }
 }
 
-static SYSTEM_CONNECTION: OnceLock<Result<Connection>> = OnceLock::new(); // Cached system bus connection
-static AUTHORITY_PROXY: OnceLock<Result<AuthorityProxyBlocking<'static>>> = OnceLock::new(); // Cached authority proxy
-
 pub(crate) fn get_system_connection() -> Result<Connection> {
-    let r: &Result<Connection> = SYSTEM_CONNECTION.get_or_init(|| {
-        Connection::system()
-            .map_err(|_| Error::Unavailable)
-    });
-
-    match r {
-        Ok(conn) => Ok(conn.clone()),
-        Err(e) => Err(e.clone()),
-    }
+    Connection::system().map_err(|_| Error::Unavailable)
 }
 
-pub(crate) fn get_authority_proxy() -> Result<AuthorityProxyBlocking<'static>> {
-    let r: &Result<AuthorityProxyBlocking<'static>> = AUTHORITY_PROXY.get_or_init(|| {
-        let conn = get_system_connection()?;
-        AuthorityProxyBlocking::new(&conn).map_err(|_| Error::Unavailable)
-    });
-
-    match r {
-        Ok(p) => Ok(p.clone()),
-        Err(e) => Err(e.clone()),
-    }
+pub(crate) fn get_authority_proxy(
+    conn: &Connection,
+) -> Result<AuthorityProxyBlocking<'_>> {
+    AuthorityProxyBlocking::new(conn).map_err(|_| Error::Unavailable)
 }
 
 fn do_polkit_check(action_id: &str) -> Result<()> {
-    // Get authority proxy (and cache it for future usage).
-    let auth = get_authority_proxy()?;
+    // Create a fresh system connection and proxy per request to avoid stale handles
+    // after sleep/resume or bus restarts.
+    let conn = get_system_connection()?;
+    let auth = get_authority_proxy(&conn)?;
     let details = HashMap::new();
 
     // Use a unix-process subject including pid start-time and real uid.
