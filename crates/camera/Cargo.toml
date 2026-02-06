@@ -1,0 +1,77 @@
+[package]
+name = "robius-camera"
+version.workspace = true
+edition.workspace = true
+authors = [
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for capturing photos using the system camera UI"
+documentation = "https://docs.rs/robius-camera"
+homepage.workspace = true
+keywords = ["robius", "camera", "photo", "capture", "image"]
+categories.workspace = true
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+
+[build-dependencies]
+android-build.workspace = true
+
+[dependencies]
+cfg-if.workspace = true
+log = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+robius-android-env = { workspace = true, features = ["makepad"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+block2.workspace = true
+dispatch2 = { workspace = true, features = ["objc2"] }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = [
+    "NSData",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSKeyValueCoding",
+    "NSObject",
+    "NSString",
+    "NSURL",
+] }
+objc2-core-foundation = { version = "0.3.1", default-features = false, features = ["std"] }
+objc2-ui-kit = { workspace = true, features = [
+    "block2",
+    "objc2-core-foundation",
+    "UIGeometry",
+    "UIGraphics",
+    "UIImage",
+    "UIImagePickerController",
+    "UINavigationController",
+    "UIResponder",
+    "UIScene",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "UIWindowScene",
+    "UIApplication",
+] }
+objc2-av-foundation = { version = "0.3.1", default-features = false, features = [
+    "AVCaptureDevice",
+    "AVMediaFormat",
+    "block2",
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-core = { workspace = true }
+windows = { workspace = true, features = [
+    "Foundation",
+    "Media_Capture",
+    "Storage",
+    "Storage_Streams",
+    "Graphics_Imaging",
+    "Win32_System_Com",
+] }
+
+[features]
+default = []
+log = ["dep:log"]
