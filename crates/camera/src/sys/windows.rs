@@ -6,10 +6,13 @@
 use std::thread;
 
 use windows::{
+    core::Interface,
     Foundation::IAsyncOperation,
     Graphics::Imaging::BitmapDecoder,
     Media::Capture::{CameraCaptureUI, CameraCaptureUIMode, CameraCaptureUIPhotoFormat},
     Storage::{FileAccessMode, StorageFile},
+    Win32::UI::Shell::IInitializeWithWindow,
+    Win32::UI::WindowsAndMessaging::GetForegroundWindow,
 };
 
 use crate::{CameraPosition, Error, PhotoData, Result};
@@ -65,6 +68,12 @@ fn capture_photo_sync() -> Result<PhotoData> {
 
 /// The actual capture implementation.
 fn capture_photo_impl() -> Result<PhotoData> {
+    eprintln!("[debug] Getting foreground window...");
+    // Get the foreground window to use as parent for the camera UI
+    // In a real app (like Makepad), this will be the app's window
+    let hwnd = unsafe { GetForegroundWindow() };
+    eprintln!("[debug] Got window handle: {:?}", hwnd);
+
     eprintln!("[debug] Creating CameraCaptureUI...");
     // Create the camera capture UI
     let capture_ui = CameraCaptureUI::new().map_err(|e| {
@@ -73,6 +82,20 @@ fn capture_photo_impl() -> Result<PhotoData> {
         log::error!("Failed to create CameraCaptureUI: {:?}", e);
         Error::CameraUnavailable
     })?;
+
+    // Initialize the UI with the window handle (required for Win32 apps)
+    eprintln!("[debug] Initializing with window handle...");
+    let init_with_window: IInitializeWithWindow = capture_ui.cast().map_err(|e| {
+        eprintln!("Failed to cast to IInitializeWithWindow: {:?}", e);
+        Error::Unknown
+    })?;
+
+    unsafe {
+        init_with_window.Initialize(hwnd).map_err(|e| {
+            eprintln!("Failed to initialize with window: {:?}", e);
+            Error::Unknown
+        })?;
+    }
 
     eprintln!("[debug] Getting photo settings...");
     // Configure photo settings
