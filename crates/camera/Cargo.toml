@@ -61,20 +61,6 @@ objc2-av-foundation = { version = "0.3.1", default-features = false, features = 
     "block2",
 ] }
 
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-core = { workspace = true }
-windows = { workspace = true, features = [
-    "Foundation",
-    "Media_Capture",
-    "Storage",
-    "Storage_Streams",
-    "Graphics_Imaging",
-    "Win32_System_Com",
-    "Win32_Foundation",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-] }
-
 [features]
 default = []
 log = ["dep:log"]

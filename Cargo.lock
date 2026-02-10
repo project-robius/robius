@@ -763,8 +763,6 @@ dependencies = [
  "objc2-foundation",
  "objc2-ui-kit",
  "robius-android-env",
- "windows",
- "windows-core",
 ]
 
 [[package]]

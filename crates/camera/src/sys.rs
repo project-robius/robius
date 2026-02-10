@@ -5,9 +5,6 @@ cfg_if::cfg_if! {
     } else if #[cfg(target_os = "ios")] {
         mod ios;
         pub(crate) use ios::*;
-    } else if #[cfg(target_os = "windows")] {
-        mod windows;
-        pub(crate) use windows::*;
     } else {
         mod unsupported;
         pub(crate) use unsupported::*;
