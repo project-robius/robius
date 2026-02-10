@@ -6,15 +6,10 @@
 use std::thread;
 
 use windows::{
-    core::Interface,
-    Foundation::{AsyncStatus, IAsyncOperation},
+    Foundation::IAsyncOperation,
     Graphics::Imaging::BitmapDecoder,
     Media::Capture::{CameraCaptureUI, CameraCaptureUIMode, CameraCaptureUIPhotoFormat},
     Storage::{FileAccessMode, StorageFile},
-    Win32::UI::Shell::IInitializeWithWindow,
-    Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
-    },
 };
 
 use crate::{CameraPosition, Error, PhotoData, Result};
@@ -70,102 +65,44 @@ fn capture_photo_sync() -> Result<PhotoData> {
 
 /// The actual capture implementation.
 fn capture_photo_impl() -> Result<PhotoData> {
-    eprintln!("[debug] Creating CameraCaptureUI...");
     // Create the camera capture UI
-    let capture_ui = CameraCaptureUI::new().map_err(|e| {
-        eprintln!("Failed to create CameraCaptureUI: {:?}", e);
+    let capture_ui = CameraCaptureUI::new().map_err(|_e| {
         #[cfg(feature = "log")]
-        log::error!("Failed to create CameraCaptureUI: {:?}", e);
+        log::error!("Failed to create CameraCaptureUI: {:?}", _e);
         Error::CameraUnavailable
     })?;
 
-    // Try to initialize with window handle if available (required for some Win32 apps)
-    // This may fail on some Windows versions where CameraCaptureUI doesn't support it
-    if let Ok(init_with_window) = capture_ui.cast::<IInitializeWithWindow>() {
-        let hwnd = unsafe { GetForegroundWindow() };
-        eprintln!("[debug] Initializing with window handle: {:?}", hwnd);
-        unsafe {
-            if let Err(e) = init_with_window.Initialize(hwnd) {
-                eprintln!("[debug] Initialize with window failed (non-fatal): {:?}", e);
-            }
-        }
-    } else {
-        eprintln!("[debug] IInitializeWithWindow not supported, continuing without it");
-    }
-
-    eprintln!("[debug] Getting photo settings...");
     // Configure photo settings
-    let photo_settings = capture_ui.PhotoSettings().map_err(|e| {
-        eprintln!("Failed to get photo settings: {:?}", e);
+    let photo_settings = capture_ui.PhotoSettings().map_err(|_e| {
         #[cfg(feature = "log")]
-        log::error!("Failed to get photo settings: {:?}", e);
+        log::error!("Failed to get photo settings: {:?}", _e);
         Error::Unknown
     })?;
 
-    eprintln!("[debug] Setting format to JPEG...");
     // Set format to JPEG
     photo_settings
         .SetFormat(CameraCaptureUIPhotoFormat::Jpeg)
-        .map_err(|e| {
-            eprintln!("Failed to set photo format: {:?}", e);
+        .map_err(|_e| {
             #[cfg(feature = "log")]
-            log::error!("Failed to set photo format: {:?}", e);
+            log::error!("Failed to set photo format: {:?}", _e);
             Error::Unknown
         })?;
 
-    eprintln!("[debug] Launching capture UI...");
     // Launch the capture UI and wait for result
     let async_op: IAsyncOperation<StorageFile> = capture_ui
         .CaptureFileAsync(CameraCaptureUIMode::Photo)
-        .map_err(|e| {
-            eprintln!("Failed to start capture: {:?}", e);
+        .map_err(|_e| {
             #[cfg(feature = "log")]
-            log::error!("Failed to start capture: {:?}", e);
+            log::error!("Failed to start capture: {:?}", _e);
             Error::CameraUnavailable
         })?;
 
-    eprintln!("[debug] Waiting for capture result (pumping messages)...");
-    // Pump messages while waiting for the async operation to complete
-    // This is required for the UI to show and respond to user input
-    let file: StorageFile = loop {
-        // Check if the operation is complete
-        let status = async_op.Status().map_err(|e| {
-            eprintln!("Failed to get async status: {:?}", e);
-            Error::Unknown
-        })?;
-
-        match status {
-            AsyncStatus::Completed => {
-                eprintln!("[debug] Async operation completed");
-                break async_op.GetResults().map_err(|e| {
-                    eprintln!("Failed to get results: {:?}", e);
-                    Error::Unknown
-                })?;
-            }
-            AsyncStatus::Error => {
-                eprintln!("[debug] Async operation error");
-                return Err(Error::Unknown);
-            }
-            AsyncStatus::Canceled => {
-                eprintln!("[debug] Async operation canceled");
-                return Err(Error::Cancelled);
-            }
-            AsyncStatus::Started => {
-                // Still running - pump messages
-                unsafe {
-                    let mut msg = MSG::default();
-                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                        let _ = TranslateMessage(&msg);
-                        DispatchMessageW(&msg);
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            _ => {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }
-    };
+    // Wait for the async operation to complete
+    let file: StorageFile = async_op.get().map_err(|_e| {
+        #[cfg(feature = "log")]
+        log::error!("Capture operation failed: {:?}", _e);
+        Error::Unknown
+    })?;
 
     // Check if user cancelled (file will be null/empty path)
     let path = file.Path().map_err(|_| Error::Cancelled)?;

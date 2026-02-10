@@ -1,20 +1,22 @@
 //! Simple example demonstrating how to capture a photo using the system camera.
 //!
 //! Run with: `cargo run --example simple_capture`
+//!
+//! **Note for Windows:** This example may not work from a console app because
+//! `CameraCaptureUI` is a UWP API that requires a proper windowed app context.
+//! To test on Windows, integrate into a GUI app like Makepad instead.
 
 use robius_camera::{capture_photo, is_available, CameraPosition};
 use std::sync::mpsc;
 
 fn main() {
     // Check if camera is available on this device
-    println!("Checking camera availability...");
-    if is_available() {
-        println!("Camera is available");
-    } else {
-        println!("is_available() returned false, but trying capture anyway...");
+    if !is_available() {
+        eprintln!("Camera is not available on this device");
+        return;
     }
 
-    println!("Opening capture UI...");
+    println!("Camera is available, opening capture UI...");
 
     // Use a channel to wait for the async callback
     let (tx, rx) = mpsc::channel();
