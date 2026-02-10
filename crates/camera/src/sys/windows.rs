@@ -101,11 +101,20 @@ fn capture_photo_impl() -> Result<PhotoData> {
     eprintln!("CaptureFileAsync started, waiting for result...");
 
     // Wait for the async operation to complete
-    let file: StorageFile = async_op.get().map_err(|e| {
-        eprintln!("Capture operation failed: {:?}", e);
-        eprintln!("HRESULT: {:?}", e.code());
-        Error::Unknown
-    })?;
+    // When user cancels, CameraCaptureUI returns null which windows-rs treats as an error
+    // with S_OK (0x00000000). We detect this and return Cancelled.
+    let file: StorageFile = match async_op.get() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Capture operation result: {:?}", e);
+            eprintln!("HRESULT: {:?}", e.code());
+            // S_OK with "error" means null result = user cancelled
+            if e.code().0 == 0 {
+                return Err(Error::Cancelled);
+            }
+            return Err(Error::Unknown);
+        }
+    };
 
     // Check if user cancelled (file will be null/empty path)
     let path = file.Path().map_err(|_| Error::Cancelled)?;
