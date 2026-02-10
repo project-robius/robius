@@ -43,11 +43,11 @@ where
 /// Synchronous implementation of photo capture.
 fn capture_photo_sync() -> Result<PhotoData> {
     // Initialize COM for this thread (needed for WinRT)
-    // Using multi-threaded apartment since we're in a spawned thread
+    // CameraCaptureUI requires single-threaded apartment (STA)
     unsafe {
         windows::Win32::System::Com::CoInitializeEx(
             None,
-            windows::Win32::System::Com::COINIT_MULTITHREADED,
+            windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
         )
         .ok()
         .map_err(|_| Error::Unknown)?;
@@ -189,10 +189,11 @@ fn read_photo_from_file(file: &StorageFile) -> Result<PhotoData> {
 /// Returns whether camera capture is available on this device.
 pub(crate) fn is_available() -> bool {
     // Initialize COM for this thread (needed for WinRT)
+    // CameraCaptureUI requires single-threaded apartment (STA)
     let init_result = unsafe {
         windows::Win32::System::Com::CoInitializeEx(
             None,
-            windows::Win32::System::Com::COINIT_MULTITHREADED,
+            windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
         )
     };
 
