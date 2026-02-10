@@ -7,12 +7,14 @@ use std::thread;
 
 use windows::{
     core::Interface,
-    Foundation::IAsyncOperation,
+    Foundation::{AsyncStatus, IAsyncOperation},
     Graphics::Imaging::BitmapDecoder,
     Media::Capture::{CameraCaptureUI, CameraCaptureUIMode, CameraCaptureUIPhotoFormat},
     Storage::{FileAccessMode, StorageFile},
     Win32::UI::Shell::IInitializeWithWindow,
-    Win32::UI::WindowsAndMessaging::GetForegroundWindow,
+    Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetForegroundWindow, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+    },
 };
 
 use crate::{CameraPosition, Error, PhotoData, Result};
@@ -122,14 +124,48 @@ fn capture_photo_impl() -> Result<PhotoData> {
             Error::CameraUnavailable
         })?;
 
-    eprintln!("[debug] Waiting for capture result...");
-    // Wait for the async operation to complete
-    let file: StorageFile = async_op.get().map_err(|e| {
-        eprintln!("Capture operation failed: {:?}", e);
-        #[cfg(feature = "log")]
-        log::error!("Capture operation failed: {:?}", e);
-        Error::Unknown
-    })?;
+    eprintln!("[debug] Waiting for capture result (pumping messages)...");
+    // Pump messages while waiting for the async operation to complete
+    // This is required for the UI to show and respond to user input
+    let file: StorageFile = loop {
+        // Check if the operation is complete
+        let status = async_op.Status().map_err(|e| {
+            eprintln!("Failed to get async status: {:?}", e);
+            Error::Unknown
+        })?;
+
+        match status {
+            AsyncStatus::Completed => {
+                eprintln!("[debug] Async operation completed");
+                break async_op.GetResults().map_err(|e| {
+                    eprintln!("Failed to get results: {:?}", e);
+                    Error::Unknown
+                })?;
+            }
+            AsyncStatus::Error => {
+                eprintln!("[debug] Async operation error");
+                return Err(Error::Unknown);
+            }
+            AsyncStatus::Canceled => {
+                eprintln!("[debug] Async operation canceled");
+                return Err(Error::Cancelled);
+            }
+            AsyncStatus::Started => {
+                // Still running - pump messages
+                unsafe {
+                    let mut msg = MSG::default();
+                    while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                        let _ = TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            _ => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    };
 
     // Check if user cancelled (file will be null/empty path)
     let path = file.Path().map_err(|_| Error::Cancelled)?;
