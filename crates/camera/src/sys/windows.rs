@@ -6,10 +6,13 @@
 use std::thread;
 
 use windows::{
+    core::Interface,
     Foundation::IAsyncOperation,
     Graphics::Imaging::BitmapDecoder,
     Media::Capture::{CameraCaptureUI, CameraCaptureUIMode, CameraCaptureUIPhotoFormat},
     Storage::{FileAccessMode, StorageFile},
+    Win32::UI::Shell::IInitializeWithWindow,
+    Win32::UI::WindowsAndMessaging::GetForegroundWindow,
 };
 
 use crate::{CameraPosition, Error, PhotoData, Result};
@@ -72,6 +75,28 @@ fn capture_photo_impl() -> Result<PhotoData> {
         Error::CameraUnavailable
     })?;
     eprintln!("CameraCaptureUI created successfully");
+
+    // Try to initialize with the foreground window
+    // This allows the UWP dialog to be associated with a Win32 window
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        eprintln!("Foreground window HWND: {:?}", hwnd);
+
+        if !hwnd.is_invalid() {
+            match capture_ui.cast::<IInitializeWithWindow>() {
+                Ok(init_window) => {
+                    match init_window.Initialize(hwnd) {
+                        Ok(()) => eprintln!("IInitializeWithWindow succeeded"),
+                        Err(e) => eprintln!("IInitializeWithWindow.Initialize failed: {:?}", e),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("CameraCaptureUI doesn't support IInitializeWithWindow: {:?}", e);
+                    // Continue anyway - might work without it
+                }
+            }
+        }
+    }
 
     // Configure photo settings
     let photo_settings = capture_ui.PhotoSettings().map_err(|_e| {
