@@ -65,8 +65,9 @@ pub(crate) fn is_available() -> bool {
             )
         }
     } else {
-        // Can't check from non-main thread, assume available
-        true
+        // Can't check from non-main thread, conservatively return false
+        // since we can't verify availability without main thread access
+        false
     }
 }
 
@@ -190,8 +191,13 @@ where
         picker.setDelegate(Some(msg_send![delegate_ref, self]));
     }
 
-    // We need to keep the delegate alive - leak it temporarily.
-    // It will be cleaned up when the picker is dismissed (not ideal, but works)
+    // We need to keep the delegate alive for the duration of the picker.
+    // UIImagePickerController holds a weak reference to its delegate, so we must
+    // prevent the delegate from being deallocated. We leak it here because:
+    // 1. The delegate will be called exactly once (either didFinishPicking or didCancel)
+    // 2. After the callback, the picker is dismissed and the delegate is no longer needed
+    // 3. The leaked memory is small (~48 bytes) and happens once per capture
+    // TODO: Consider using a static storage slot that gets reused across captures
     std::mem::forget(delegate_proto);
 
     // Get the root view controller to present from

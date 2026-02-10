@@ -9,7 +9,6 @@
 //!
 //! - **iOS**: Uses `UIImagePickerController` with the camera source type
 //! - **Android**: Uses `Intent` with `ACTION_IMAGE_CAPTURE`
-//! - **Windows**: Uses `CameraCaptureUI`
 //!
 //! ## Examples
 //!
@@ -80,7 +79,7 @@ pub struct PhotoData {
 
 impl PhotoData {
     /// Creates a new `PhotoData` from the given JPEG data and dimensions.
-    #[allow(dead_code)] // Used by platform-specific implementations
+    #[allow(dead_code)] // Only used on supported platforms (iOS, Android)
     pub(crate) fn new(jpeg_data: Vec<u8>, width: u32, height: u32) -> Self {
         Self {
             jpeg_data,
@@ -139,7 +138,6 @@ impl std::fmt::Debug for PhotoData {
 ///
 /// - **iOS**: Must be called from the main thread. Uses `UIImagePickerController`.
 /// - **Android**: Uses `ACTION_IMAGE_CAPTURE` intent.
-/// - **Windows**: Uses `CameraCaptureUI`.
 ///
 /// # Examples
 ///

@@ -25,13 +25,12 @@ plugin, prioritizing simplicity and native UX over full camera control.
 |----------|----------------|-------|
 | iOS | [`UIImagePickerController`] | Full support |
 | Android | [`ACTION_IMAGE_CAPTURE`] Intent | Full support |
-| Windows | [`CameraCaptureUI`] | Full support |
+| Windows | - | Not supported (CameraCaptureUI requires UWP context) |
 | macOS | - | Not yet supported (no system camera UI) |
 | Linux | - | Not yet supported (no system camera UI) |
 
 [`UIImagePickerController`]: https://developer.apple.com/documentation/uikit/uiimagepickercontroller
 [`ACTION_IMAGE_CAPTURE`]: https://developer.android.com/reference/android/provider/MediaStore#ACTION_IMAGE_CAPTURE
-[`CameraCaptureUI`]: https://learn.microsoft.com/en-us/uwp/api/windows.media.capture.cameracaptureui
 
 ## Feature Flags
 
@@ -56,9 +55,8 @@ Add the following to your app's `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.CAMERA" />
 ```
 
-**Note:** For [Makepad](https://github.com/makepad/makepad) apps, no additional manifest
-changes are required beyond the above. The crate integrates with Makepad's activity
-result callback infrastructure.
+**Note:** Android support currently requires [Makepad](https://github.com/makepad/makepad).
+The crate integrates with Makepad's activity result callback infrastructure via `robius-android-env`.
 
 
 ## Example

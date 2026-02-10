@@ -2,9 +2,8 @@
 //!
 //! Run with: `cargo run --example simple_capture`
 //!
-//! **Note for Windows:** This example may not work from a console app because
-//! `CameraCaptureUI` is a UWP API that requires a proper windowed app context.
-//! To test on Windows, integrate into a GUI app like Makepad instead.
+//! **Note:** This example only works on iOS and Android. On other platforms,
+//! `is_available()` will return `false`.
 
 use robius_camera::{capture_photo, is_available, CameraPosition};
 use std::sync::mpsc;
