@@ -82,7 +82,7 @@ fn capture_photo_impl() -> Result<PhotoData> {
         let hwnd = GetForegroundWindow();
         eprintln!("Foreground window HWND: {:?}", hwnd);
 
-        if hwnd.0 != std::ptr::null_mut() {
+        if hwnd.0 != 0 {
             match capture_ui.cast::<IInitializeWithWindow>() {
                 Ok(init_window) => {
                     match init_window.Initialize(hwnd) {
