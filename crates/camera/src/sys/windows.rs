@@ -187,7 +187,29 @@ fn read_photo_from_file(file: &StorageFile) -> Result<PhotoData> {
 
 /// Returns whether camera capture is available on this device.
 pub(crate) fn is_available() -> bool {
+    // Initialize COM for this thread (needed for WinRT)
+    let init_result = unsafe {
+        windows::Win32::System::Com::CoInitializeEx(
+            None,
+            windows::Win32::System::Com::COINIT_MULTITHREADED,
+        )
+    };
+
+    // Check if COM init succeeded (or was already initialized)
+    if init_result.is_err() && init_result != windows::Win32::Foundation::RPC_E_CHANGED_MODE {
+        return false;
+    }
+
     // Try to create a CameraCaptureUI instance
     // This will fail if no camera hardware is available
-    CameraCaptureUI::new().is_ok()
+    let available = CameraCaptureUI::new().is_ok();
+
+    // Uninitialize COM if we initialized it
+    if init_result.is_ok() {
+        unsafe {
+            windows::Win32::System::Com::CoUninitialize();
+        }
+    }
+
+    available
 }
