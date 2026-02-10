@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::sync::Mutex;
 
 use block2::{DynBlock, RcBlock};
 use dispatch2::run_on_main;
@@ -186,19 +187,15 @@ where
 
     unsafe {
         // The delegate is a weak reference, so we need to keep it alive
-        // We'll store it in a static or leak it for the duration of the picker
         let delegate_ref: &ProtocolObject<dyn UIImagePickerControllerDelegate> = &delegate_proto;
         picker.setDelegate(Some(msg_send![delegate_ref, self]));
     }
 
-    // We need to keep the delegate alive for the duration of the picker.
-    // UIImagePickerController holds a weak reference to its delegate, so we must
-    // prevent the delegate from being deallocated. We leak it here because:
-    // 1. The delegate will be called exactly once (either didFinishPicking or didCancel)
-    // 2. After the callback, the picker is dismissed and the delegate is no longer needed
-    // 3. The leaked memory is small (~48 bytes) and happens once per capture
-    // TODO: Consider using a static storage slot that gets reused across captures
-    std::mem::forget(delegate_proto);
+    // Store the delegate in static storage to keep it alive while the picker is presented.
+    // UIImagePickerController holds a weak reference to its delegate, so we must prevent
+    // it from being deallocated. The delegate callbacks will clear this when they fire.
+    // Note: If a previous capture is somehow still pending, this will drop that delegate.
+    *ACTIVE_DELEGATE.lock().unwrap() = Some(delegate_proto);
 
     // Get the root view controller to present from
     let Some(window) = (unsafe { get_key_window(mtm) }) else {
@@ -262,6 +259,12 @@ fn original_image_key() -> &'static NSString {
 /// Type alias for the callback function.
 type Callback = Box<dyn FnOnce(Result<PhotoData>) + Send>;
 
+/// Storage for the active delegate to prevent deallocation while the picker is presented.
+/// UIImagePickerController holds a weak reference to its delegate, so we must keep it alive.
+/// This is cleared when the delegate callback fires.
+static ACTIVE_DELEGATE: Mutex<Option<Retained<ProtocolObject<dyn UIImagePickerControllerDelegate>>>> =
+    Mutex::new(None);
+
 /// Delegate for handling UIImagePickerController callbacks.
 struct Ivars {
     callback: Cell<Option<Callback>>,
@@ -322,6 +325,9 @@ define_class!(
             if let Some(cb) = callback {
                 cb(result);
             }
+
+            // Clear the static delegate storage now that we're done
+            *ACTIVE_DELEGATE.lock().unwrap() = None;
         }
 
         #[unsafe(method(imagePickerControllerDidCancel:))]
@@ -334,6 +340,9 @@ define_class!(
             if let Some(cb) = self.ivars().callback.take() {
                 cb(Err(Error::Cancelled));
             }
+
+            // Clear the static delegate storage now that we're done
+            *ACTIVE_DELEGATE.lock().unwrap() = None;
         }
     }
 );
