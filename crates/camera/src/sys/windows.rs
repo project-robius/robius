@@ -65,6 +65,7 @@ fn capture_photo_sync() -> Result<PhotoData> {
 
 /// The actual capture implementation.
 fn capture_photo_impl() -> Result<PhotoData> {
+    eprintln!("[debug] Creating CameraCaptureUI...");
     // Create the camera capture UI
     let capture_ui = CameraCaptureUI::new().map_err(|e| {
         eprintln!("Failed to create CameraCaptureUI: {:?}", e);
@@ -73,35 +74,43 @@ fn capture_photo_impl() -> Result<PhotoData> {
         Error::CameraUnavailable
     })?;
 
+    eprintln!("[debug] Getting photo settings...");
     // Configure photo settings
-    let photo_settings = capture_ui.PhotoSettings().map_err(|_e| {
+    let photo_settings = capture_ui.PhotoSettings().map_err(|e| {
+        eprintln!("Failed to get photo settings: {:?}", e);
         #[cfg(feature = "log")]
-        log::error!("Failed to get photo settings: {:?}", _e);
+        log::error!("Failed to get photo settings: {:?}", e);
         Error::Unknown
     })?;
 
+    eprintln!("[debug] Setting format to JPEG...");
     // Set format to JPEG
     photo_settings
         .SetFormat(CameraCaptureUIPhotoFormat::Jpeg)
-        .map_err(|_e| {
+        .map_err(|e| {
+            eprintln!("Failed to set photo format: {:?}", e);
             #[cfg(feature = "log")]
-            log::error!("Failed to set photo format: {:?}", _e);
+            log::error!("Failed to set photo format: {:?}", e);
             Error::Unknown
         })?;
 
+    eprintln!("[debug] Launching capture UI...");
     // Launch the capture UI and wait for result
     let async_op: IAsyncOperation<StorageFile> = capture_ui
         .CaptureFileAsync(CameraCaptureUIMode::Photo)
-        .map_err(|_e| {
+        .map_err(|e| {
+            eprintln!("Failed to start capture: {:?}", e);
             #[cfg(feature = "log")]
-            log::error!("Failed to start capture: {:?}", _e);
+            log::error!("Failed to start capture: {:?}", e);
             Error::CameraUnavailable
         })?;
 
+    eprintln!("[debug] Waiting for capture result...");
     // Wait for the async operation to complete
-    let file: StorageFile = async_op.get().map_err(|_e| {
+    let file: StorageFile = async_op.get().map_err(|e| {
+        eprintln!("Capture operation failed: {:?}", e);
         #[cfg(feature = "log")]
-        log::error!("Capture operation failed: {:?}", _e);
+        log::error!("Capture operation failed: {:?}", e);
         Error::Unknown
     })?;
 
