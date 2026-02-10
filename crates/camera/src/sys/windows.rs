@@ -66,9 +66,10 @@ fn capture_photo_sync() -> Result<PhotoData> {
 /// The actual capture implementation.
 fn capture_photo_impl() -> Result<PhotoData> {
     // Create the camera capture UI
-    let capture_ui = CameraCaptureUI::new().map_err(|_e| {
+    let capture_ui = CameraCaptureUI::new().map_err(|e| {
+        eprintln!("Failed to create CameraCaptureUI: {:?}", e);
         #[cfg(feature = "log")]
-        log::error!("Failed to create CameraCaptureUI: {:?}", _e);
+        log::error!("Failed to create CameraCaptureUI: {:?}", e);
         Error::CameraUnavailable
     })?;
 
