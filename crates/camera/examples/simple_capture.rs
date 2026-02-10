@@ -7,12 +7,14 @@ use std::sync::mpsc;
 
 fn main() {
     // Check if camera is available on this device
-    if !is_available() {
-        eprintln!("Camera is not available on this device");
-        return;
+    println!("Checking camera availability...");
+    if is_available() {
+        println!("Camera is available");
+    } else {
+        println!("is_available() returned false, but trying capture anyway...");
     }
 
-    println!("Camera is available, opening capture UI...");
+    println!("Opening capture UI...");
 
     // Use a channel to wait for the async callback
     let (tx, rx) = mpsc::channel();
