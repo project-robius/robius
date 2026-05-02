@@ -30,43 +30,73 @@ To use this crate on Android, you must add the following to your app's `AndroidM
 <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 ```
 
-## Example
+## Usage on Linux
 
-```rust
-use robius_authentication::{
-    AndroidText, BiometricStrength, Context, Policy, PolicyBuilder, Text, WindowsText,
-};
+On Linux, `robius-authentication` uses **polkit** to request authorization via the
+desktop environment's native authentication prompt (GNOME/KDE/etc).
 
-let policy: Policy = PolicyBuilder::new()
-    .biometrics(Some(BiometricStrength::Strong))
-    .password(true)
-    .companion(true)
-    .build()
-    .unwrap();
+> [!IMPORTANT]
+> **Ensure a polkit agent is running**
+>
+> The prompt is displayed by a polkit authentication agent (GNOME/KDE usually start one automatically).
+> If no agent is running (headless/SSH), no prompt will appear and auth will fail.
 
-let text = Text {
-    android: AndroidText {
-        title: "Title",
-        subtitle: None,
-        description: None,
-    },
-    apple: "authenticate",
-    windows: WindowsText::new("Title", "Description"),
-};
+### Write policy file.
 
-let callback = |auth_result| {
-    match auth_result {
-        Ok(_)  => log::info!("Authentication success!"),
-        Err(_) => log::error!(Authentication failed!"),
-    }
-};
+You can create your application's own policy file from scratch, or also create one from a template policy file.
 
-Context::new(())
-    .authenticate(text, &policy, callback)
-    .expect("Authentication failed");
+See here for an example template policy file: [`./examples/org.robius.authentication.policy`](./examples/org.robius.authentication.policy)
+
+> [!NOTE]
+>
+> A polkit policy file (`*.policy`) is an XML file that defines one or more authorization **actions** for your application.
+polkit uses these definitions to determine whether a user is allowed to perform privileged operations.
+>
+> The “actions” directory (/usr/share/polkit-1/actions/) contains .policy files that define polkit authorization actions.
+
+### Quick Test Mode ⚠️
+
+#### Step 1. Install your policy file (`*.policy`)
+
+Install the policy file into the polkit `actions` directory, which is used to define authorization actions for the application.
+
+Manually execute the following command:
+
+```bash
+sudo install -Dm644 com.yourapp.policy /usr/share/polkit-1/actions/
+```
+`polkit` loads policy definitions from /usr/share/polkit-1/actions/.
+
+#### Step 2. Ensure your policy file was correctly installed.
+
+```bash
+pkaction --action-id <YOUR_POLICY_File_ACTION_ID>
 ```
 
-For more details about the prompt text, see the `Text` struct,
-which allows you to customize the prompt for each platform.
+> During the test mode, you don't need to worry about the location of the policy file; just ensure it installs correctly.
 
-[`polkit`]: https://www.freedesktop.org/software/polkit/docs/latest/polkit.8.html
+### Release Mode
+
+> The official polkit documentation explicitly states: Mechanisms should install action XML files to [/usr/share/polkit-1/actions](https://www.freedesktop.org/software/polkit/docs/latest/polkit.8.html).
+
+
+As long as your packaging tool provides the capability to automatically install *.policy files under /usr/share/polkit-1/actions/.
+
+This document provides example for when you are using `cargo-packager`.
+
+See the example below for use `cargo-packager`.
+
+#### Use `cargo-packager`
+
+```toml
+# https://docs.crabnebula.dev/packager/configuration/#debianconfig
+[package.metadata.packager.deb]
+depends = "./dist/depends_deb.txt"
+desktop_template = "./packaging/robrix.desktop"
+section = "utils"
+
+[package.metadata.packager.deb.files]
+"./packaging/org.robius.authentication.policy" = "/usr/share/polkit-1/actions/org.robius.authentication.policy"
+```
+
+When you are packaging, `cargo-packager` automatically installs files to their target direactory.
