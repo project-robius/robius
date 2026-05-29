@@ -1,0 +1,78 @@
+[package]
+name = "robius-file-picker"
+version.workspace = true
+edition.workspace = true
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for showing native file and media pickers on multiple platforms"
+documentation = "https://docs.rs/robius-file-picker"
+homepage.workspace = true
+keywords = ["robius", "file", "picker", "dialog", "native"]
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+
+## Note: ideally this would be only included when we're building for Android,
+## but Cargo doesn't support target-specific build scripts yet.
+## See: <https://github.com/rust-lang/cargo/issues/4932> and
+## <https://github.com/rust-lang/cargo/issues/14378#issuecomment-2278333431>.
+[build-dependencies]
+android-build.workspace = true
+
+
+[dependencies]
+cfg-if.workspace = true
+
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+mime_guess = "2.0.5"
+robius-android-env.workspace = true
+
+
+[target.'cfg(target_os = "ios")'.dependencies]
+block2.workspace = true
+dispatch2 = { workspace = true, features = ["objc2"] }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = [
+    "NSArray",
+    "NSError",
+    "NSItemProvider",
+    "NSEnumerator",
+    "NSObject",
+    "NSProgress",
+    "NSString",
+    "NSURL",
+    "block2",
+] }
+objc2-photos-ui = { workspace = true, features = ["PHPicker"] }
+objc2-ui-kit = { workspace = true, features = [
+    "alloc",
+    "block2",
+    "UIApplication",
+    "UIDocumentPickerViewController",
+    "UIResponder",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "objc2-uniform-type-identifiers",
+] }
+objc2-uniform-type-identifiers = { workspace = true, features = [
+    "UTCoreTypes",
+    "UTType",
+] }
+
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+robius-directories = { path = "../directories" }
+
+
+## On macOS the native file panels must run on the main thread,
+## which we accomplish via GCD (grand central dispatch).
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = { workspace = true, features = ["objc2"] }
