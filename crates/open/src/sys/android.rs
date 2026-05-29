@@ -1,4 +1,5 @@
-use jni::objects::JValueGen;
+use jni::objects::{JObject, JValueGen};
+use jni::JNIEnv;
 
 use crate::{Error, Result};
 
@@ -27,79 +28,29 @@ impl<'a, 'b> Uri<'a, 'b> {
     where
         F: Fn(bool) + 'static,
     {
+        let action = self.action;
+        let uri = self.inner;
         let res = robius_android_env::with_activity(|env, current_activity| {
-            let action = env
-                .get_static_field("android/content/Intent", self.action, "Ljava/lang/String;")?
-                .l()?;
-
-            let string = env
-                .new_string(self.inner)
-                .map_err(|_| Error::MalformedUri)?;
-            let uri = env
-                .call_static_method(
-                    "android/net/Uri",
-                    "parse",
-                    "(Ljava/lang/String;)Landroid/net/Uri;",
-                    &[JValueGen::Object(&string)],
-                )?
-                .l()?;
-
-            let intent = env.new_object(
-                "android/content/Intent",
-                "(Ljava/lang/String;Landroid/net/Uri;)V",
-                &[JValueGen::Object(&action), JValueGen::Object(&uri)],
-            )?;
-
-            #[cfg(feature = "android-result")]
-            let is_err = {
-                let package_manager = env
-                    .call_method(
-                        current_activity,
-                        "getPackageManager",
-                        "()Landroid/content/pm/PackageManager;",
-                        &[],
-                    )?
-                    .l()?;
-
-                let component_name = env
-                    .call_method(
-                        &intent,
-                        "resolveActivity",
-                        "(Landroid/content/pm/PackageManager;)Landroid/content/ComponentName;",
-                        &[JValueGen::Object(&package_manager)],
-                    )?
-                    .l()?;
-
-                component_name.as_raw().is_null()
-            };
-            #[cfg(not(feature = "android-result"))]
-            let is_err = false;
-
-            if is_err {
-                // NOTE: If the correct permissions aren't added to the app manifest,
-                // resolveActivity will return null regardless.
-                Err(Error::NoHandler)
-            } else {
-                env.call_method(
-                    current_activity,
-                    "startActivity",
-                    "(Landroid/content/Intent;)V",
-                    &[JValueGen::Object(&intent)],
-                )?;
-                Ok(())
+            let outcome = open_intent(env, current_activity, action, uri);
+            // Clear any pending exceptions to avoid misinterpreting stale/wrong exceptions.
+            if matches!(env.exception_check(), Ok(true)) {
+                let _ = env.exception_clear();
             }
+            outcome
         });
 
         match res {
-            Ok(Ok(())) => {
-                on_completion(true);
-                Ok(())
+            Ok(Ok(opened)) => {
+                on_completion(opened);
+                if opened {
+                    Ok(())
+                } else {
+                    Err(Error::NoHandler)
+                }
             }
             Ok(Err(e)) => {
                 #[cfg(feature = "log")]
-                log::error!(
-                    "resolveActivity method failed. Is your app manifest missing permissions?"
-                );
+                log::error!("robius-open: failed to start activity: {e:?}");
                 Err(e)
             }
             Err(_e) => {
@@ -110,5 +61,47 @@ impl<'a, 'b> Uri<'a, 'b> {
                 Err(Error::AndroidEnvironment)
             }
         }
+    }
+}
+
+/// Builds and launches an `ACTION_VIEW` intent for the given `uri`.
+///
+/// This catches an `ActivityNotFoundException` and returns it as a no handler error.
+///
+/// * Returns `Ok(true)` if successfully launched and handled
+/// * Returns `Ok(false)` if nothing was able to handle the URI
+/// * Returns an `Err` otherwise
+fn open_intent(
+    env: &mut JNIEnv<'_>,
+    current_activity: &JObject<'_>,
+    action: &str,
+    uri: &str,
+) -> Result<bool> {
+    let action = env.get_static_field("android/content/Intent", action, "Ljava/lang/String;")?.l()?;
+
+    let string = env.new_string(uri).map_err(|_| Error::MalformedUri)?;
+    let uri = env.call_static_method(
+        "android/net/Uri",
+        "parse",
+        "(Ljava/lang/String;)Landroid/net/Uri;",
+        &[JValueGen::Object(&string)],
+    )?
+    .l()?;
+
+    let intent = env.new_object(
+        "android/content/Intent",
+        "(Ljava/lang/String;Landroid/net/Uri;)V",
+        &[JValueGen::Object(&action), JValueGen::Object(&uri)],
+    )?;
+
+    match env.call_method(
+        current_activity,
+        "startActivity",
+        "(Landroid/content/Intent;)V",
+        &[JValueGen::Object(&intent)],
+    ) {
+        Ok(_) => Ok(true),
+        Err(jni::errors::Error::JavaException) => Ok(false),
+        Err(other) => Err(Error::Java(other)),
     }
 }
