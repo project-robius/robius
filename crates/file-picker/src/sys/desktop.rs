@@ -1,6 +1,6 @@
 use std::{fs, path::{Path, PathBuf}};
 use crate::{
-    DialogCallback, DialogData, DialogOptions, Error, File, MediaKind, Result, StartLocation,
+    DialogCallback, DialogData, DialogOptions, Error, PickedFile, MediaKind, Result, StartLocation,
     DEFAULT_IMAGE_EXTENSIONS, DEFAULT_VIDEO_EXTENSIONS,
 };
 
@@ -47,7 +47,7 @@ where
 
 pub(crate) fn pick_file(options: DialogOptions, on_completion: DialogCallback) -> Result<()> {
     run_dialog_then(
-        move || dialog(options).pick_file().map(File::from_path),
+        move || dialog(options).pick_file().map(PickedFile::from_path),
         move |file| on_completion(Ok(file)),
     );
     Ok(())
@@ -64,7 +64,7 @@ pub(crate) fn save_data(
         move |chosen| {
             let result = chosen.map(|path| {
                 fs::write(&path, (*data).as_ref())?;
-                Ok(File::from_path(path))
+                Ok(PickedFile::from_path(path))
             });
             on_completion(result.transpose());
         },
@@ -81,7 +81,7 @@ pub(crate) fn pick_media(
         move || {
             media_dialog(options, media_kind)
                 .pick_file()
-                .map(File::from_path)
+                .map(PickedFile::from_path)
         },
         move |file| on_completion(Ok(file)),
     );
@@ -100,7 +100,7 @@ pub(crate) fn save_to_downloads(
     Ok(())
 }
 
-fn save_to_downloads_inner(options: DialogOptions, source_path: PathBuf) -> Result<File> {
+fn save_to_downloads_inner(options: DialogOptions, source_path: PathBuf) -> Result<PickedFile> {
     let downloads = robius_directories::UserDirs::new()
         .and_then(|user_dirs| user_dirs.download_dir().map(Path::to_owned))
         .ok_or(Error::Unsupported)?;
@@ -110,7 +110,7 @@ fn save_to_downloads_inner(options: DialogOptions, source_path: PathBuf) -> Resu
     let destination = unique_path(downloads.join(file_name));
     copy_file(&source_path, &destination)?;
 
-    Ok(File::from_path(destination))
+    Ok(PickedFile::from_path(destination))
 }
 
 fn copy_file(source_path: &Path, destination: &Path) -> Result<()> {

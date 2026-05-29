@@ -18,7 +18,7 @@
 //!
 //! On Android, picked files are returned as `content://` URIs (there's no other real option),
 //! and as regular filesystem paths on all other platforms (desktop and iOS).
-//! The [`File::into_local_file`] function abstracts over that by returning either the
+//! The [`PickedFile::into_local_file`] function abstracts over that by returning either the
 //! existing real filesystem path or streaming the URI's content into a temp file
 //! in the app's cache dir and then returning that.
 //! Thus, you can always get the file as a regular path.
@@ -40,14 +40,13 @@
 mod error;
 mod sys;
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::{Path, PathBuf}, sync::Arc};
+use picker_guard::lock_single_dialog;
 
 pub use error::{Error, Result};
-pub(crate) type DialogCallback = Box<dyn FnOnce(Result<Option<File>>) + Send + 'static>;
+pub(crate) type DialogCallback = Box<dyn FnOnce(Result<Option<PickedFile>>) + Send + 'static>;
 pub(crate) type DialogData = Box<dyn AsRef<[u8]> + Send + 'static>;
+
 
 /// The image file extensions that [`pick_image`](FileDialog::pick_image) (and
 /// the image half of [`pick_image_or_video`](FileDialog::pick_image_or_video))
@@ -185,11 +184,12 @@ impl FileDialog {
     /// Shows a native open-file dialog.
     ///
     /// The callback is called with `Ok(None)` if the user cancels the dialog.
+    /// Returns [`Error::AlreadyOpen`] if a dialog is already open.
     pub fn pick_file<F>(self, on_completion: F) -> Result<()>
     where
-        F: FnOnce(Result<Option<File>>) + Send + 'static,
+        F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
-        sys::pick_file(self.options, Box::new(on_completion))
+        sys::pick_file(self.options, lock_single_dialog(Box::new(on_completion))?)
     }
 
     /// Shows the platform's native image picker.
@@ -197,7 +197,7 @@ impl FileDialog {
     /// The callback is called with `Ok(None)` if the user cancels the picker.
     pub fn pick_image<F>(self, on_completion: F) -> Result<()>
     where
-        F: FnOnce(Result<Option<File>>) + Send + 'static,
+        F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
         self.pick_media(MediaKind::Image, on_completion)
     }
@@ -207,7 +207,7 @@ impl FileDialog {
     /// The callback is called with `Ok(None)` if the user cancels the picker.
     pub fn pick_video<F>(self, on_completion: F) -> Result<()>
     where
-        F: FnOnce(Result<Option<File>>) + Send + 'static,
+        F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
         self.pick_media(MediaKind::Video, on_completion)
     }
@@ -217,7 +217,7 @@ impl FileDialog {
     /// The callback is called with `Ok(None)` if the user cancels the picker.
     pub fn pick_image_or_video<F>(self, on_completion: F) -> Result<()>
     where
-        F: FnOnce(Result<Option<File>>) + Send + 'static,
+        F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
         self.pick_media(MediaKind::ImageOrVideo, on_completion)
     }
@@ -231,9 +231,11 @@ impl FileDialog {
     ///
     /// With no explicit location set, defaults the start location to Pictures or
     /// Videos, which only the desktop dialog and document-picker fallbacks use.
+    ///
+    /// Returns [`Error::AlreadyOpen`] if a dialog is already open.
     pub fn pick_media<F>(mut self, media_kind: MediaKind, on_completion: F) -> Result<()>
     where
-        F: FnOnce(Result<Option<File>>) + Send + 'static,
+        F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
         if self.options.directory.is_none() && self.options.start_location.is_none() {
             self.options.start_location = Some(match media_kind {
@@ -241,26 +243,27 @@ impl FileDialog {
                 MediaKind::Video => StartLocation::Videos,
             });
         }
-        sys::pick_media(self.options, media_kind, Box::new(on_completion))
+        sys::pick_media(self.options, media_kind, lock_single_dialog(Box::new(on_completion))?)
     }
 
     /// Saves the given `data` bytes to a user-specific location via platform-native operations.
     ///
     /// You should first set a file name via [`FileDialog::set_file_name`],
     /// otherwise this will return [`Error::InvalidFileName`].
+    /// Returns [`Error::AlreadyOpen`] if a dialog is already open.
     pub fn save_data<D, F>(self, data: D, on_completion: F) -> Result<()>
     where
         D: AsRef<[u8]> + Send + 'static,
-        F: FnOnce(Result<Option<File>>) + Send + 'static,
+        F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
-        sys::save_data(self.options, Box::new(data), Box::new(on_completion))
+        sys::save_data(self.options, Box::new(data), lock_single_dialog(Box::new(on_completion))?)
     }
 
     /// Saves a file to the user's Downloads location.
     pub fn save_to_downloads<P, F>(self, source_path: P, on_completion: F) -> Result<()>
     where
         P: AsRef<Path>,
-        F: FnOnce(Result<Option<File>>) + Send + 'static,
+        F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
         sys::save_to_downloads(
             self.options,
@@ -351,14 +354,14 @@ fn file_name_component(file_name: &str) -> Option<&str> {
 /// Under the hood, this is either a filesystem path or a `content://` URI,
 /// plus any metadata that the platform provided (name, MIME type, size).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct File {
+pub struct PickedFile {
     location: FileLocation,
     display_name: Option<String>,
     mime_type: Option<String>,
     size: Option<u64>,
 }
 
-impl File {
+impl PickedFile {
     #[allow(dead_code)]
     pub(crate) fn from_path(path: PathBuf) -> Self {
         Self {
@@ -372,7 +375,7 @@ impl File {
         }
     }
 
-    /// Like [`File::from_path`], but for a temporary file created by this library.
+    /// Like [`PickedFile::from_path`], but for a temporary file created by this library.
     #[allow(dead_code)]
     pub(crate) fn from_owned_temp_path(path: PathBuf) -> Self {
         Self {
@@ -480,7 +483,7 @@ impl File {
 
     /// Reads the file's contents into memory.
     ///
-    /// This buffers the whole file; generally you should use [`File::into_local_file`]
+    /// This buffers the whole file; generally you should use [`PickedFile::into_local_file`]
     /// if you need to write it to storage instead.
     pub fn read_bytes(&self) -> Result<Vec<u8>> {
         match &self.location {
@@ -512,7 +515,7 @@ impl File {
                 .filter(|name| !name.is_empty())
         }
 
-        let File {
+        let PickedFile {
             location,
             display_name,
             mime_type,
@@ -558,7 +561,7 @@ impl File {
 
 /// A file guaranteed to be reachable through a filesystem path.
 ///
-/// Produced by [`File::into_local_file`], and as stated there,
+/// Produced by [`PickedFile::into_local_file`], and as stated there,
 /// this auto-handles cleaning up any temp file instances it has created.
 ///
 /// This instance should live for as long as you need to access/use the file,
@@ -626,4 +629,42 @@ enum FileLocation {
         owned_temp: bool,
     },
     Uri(String),
+}
+
+mod picker_guard {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Whether a native dialog/picker is currently being shown
+    static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
+
+    /// A guard type that enforces our invariant that only one picker/dialog can be open at at time.
+    struct PickerGuard;
+    impl PickerGuard {
+        fn acquire() -> Option<Self> {
+            if DIALOG_OPEN.swap(true, Ordering::SeqCst) {
+                None
+            } else {
+                Some(Self)
+            }
+        }
+    }
+    impl Drop for PickerGuard {
+        fn drop(&mut self) {
+            DIALOG_OPEN.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// A convenience function for ensuring a single picker/dialog is open
+    /// for the duration of the given `on_completion` callback being invoked.
+    ///
+    /// Returns [`Error::AlreadyOpen`] if a picker dialog is already open.
+    pub(crate) fn lock_single_dialog(
+        on_completion: crate::DialogCallback,
+    ) -> crate::Result<crate::DialogCallback> {
+        let guard = PickerGuard::acquire().ok_or(crate::Error::AlreadyOpen)?;
+        Ok(Box::new(move |result| {
+            let _guard = guard;
+            on_completion(result);
+        }))
+    }
 }

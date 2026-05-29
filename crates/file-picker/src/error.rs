@@ -15,6 +15,8 @@ pub enum Error {
     Io(std::io::Error),
     /// The provided file name isn't valid on the current platform.
     InvalidFileName,
+    /// Another dialog/picker is already open. Only one can be shown at a time.
+    AlreadyOpen,
     /// This platform is unsupported.
     Unsupported,
     /// An unknown error occurred.
@@ -43,6 +45,7 @@ impl std::fmt::Display for Error {
             Error::NotMainThread => f.write_str("must be called from the main UI thread"),
             Error::Io(err) => write!(f, "I/O error: {err}"),
             Error::InvalidFileName => f.write_str("invalid file name"),
+            Error::AlreadyOpen => f.write_str("another file picker is already open"),
             Error::Unsupported => f.write_str("this platform is unsupported"),
             Error::Unknown => f.write_str("unknown error"),
         }

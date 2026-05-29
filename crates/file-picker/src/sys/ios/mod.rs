@@ -28,7 +28,7 @@ use objc2_ui_kit::{
 use objc2_uniform_type_identifiers::{UTType, UTTypeImage, UTTypeItem, UTTypeMovie};
 
 use crate::{
-    DialogCallback, DialogData, DialogOptions, Error, File, FileFilter, MediaKind, Result,
+    DialogCallback, DialogData, DialogOptions, Error, PickedFile, FileFilter, MediaKind, Result,
     StartLocation, DEFAULT_IMAGE_EXTENSIONS, DEFAULT_VIDEO_EXTENSIONS,
 };
 
@@ -244,7 +244,7 @@ impl RobiusDocumentPickerDelegate {
         self.ivars().pending.set(pending);
     }
 
-    fn finish(&self, result: Result<Option<File>>) {
+    fn finish(&self, result: Result<Option<PickedFile>>) {
         let pending = self.ivars().pending.replace(ptr::null_mut());
         if pending.is_null() { return; }
 
@@ -594,7 +594,7 @@ impl Drop for MediaLoadGuard {
     }
 }
 
-fn finish_media_picker(pending: *mut PendingMediaPicker, result: Result<Option<File>>) {
+fn finish_media_picker(pending: *mut PendingMediaPicker, result: Result<Option<PickedFile>>) {
     if pending.is_null() {
         return;
     }
@@ -609,7 +609,7 @@ fn finish_media_picker(pending: *mut PendingMediaPicker, result: Result<Option<F
     }
 }
 
-fn copy_media_file(url: &NSURL, suggested_name: Option<&str>) -> Result<File> {
+fn copy_media_file(url: &NSURL, suggested_name: Option<&str>) -> Result<PickedFile> {
     if unsafe { url.isFileURL() } {
         if let Some(path) = unsafe { url.path() } {
             let source_path = PathBuf::from(path.to_string());
@@ -620,16 +620,16 @@ fn copy_media_file(url: &NSURL, suggested_name: Option<&str>) -> Result<File> {
                 .filter(|name| !name.is_empty())
                 .unwrap_or("media");
             let temp_path = create_temporary_copy(file_name, &source_path)?;
-            // We created this copy, so the resulting `File` owns it and
+            // We created this copy, so the resulting `PickedFile` owns it and
             // `into_local_file` will clean it up after use.
-            return Ok(File::from_owned_temp_path(temp_path));
+            return Ok(PickedFile::from_owned_temp_path(temp_path));
         }
     }
 
     let uri = unsafe { url.absoluteString() }
         .map(|uri| uri.to_string())
         .unwrap_or_default();
-    Ok(File::from_uri(uri))
+    Ok(PickedFile::from_uri(uri))
 }
 
 fn content_types(options: &DialogOptions) -> Retained<NSArray<UTType>> {
@@ -721,14 +721,14 @@ fn file_url(path: &Path) -> Result<Retained<NSURL>> {
     Ok(unsafe { NSURL::fileURLWithPath(&NSString::from_str(path)) })
 }
 
-fn file_from_url(url: &NSURL, owned_temp: bool) -> File {
+fn file_from_url(url: &NSURL, owned_temp: bool) -> PickedFile {
     if unsafe { url.isFileURL() } {
         if let Some(path) = unsafe { url.path() } {
             let path = PathBuf::from(path.to_string());
             return if owned_temp {
-                File::from_owned_temp_path(path)
+                PickedFile::from_owned_temp_path(path)
             } else {
-                File::from_path(path)
+                PickedFile::from_path(path)
             };
         }
     }
@@ -736,5 +736,5 @@ fn file_from_url(url: &NSURL, owned_temp: bool) -> File {
     let uri = unsafe { url.absoluteString() }
         .map(|uri| uri.to_string())
         .unwrap_or_default();
-    File::from_uri(uri)
+    PickedFile::from_uri(uri)
 }

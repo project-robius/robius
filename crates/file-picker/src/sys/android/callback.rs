@@ -4,7 +4,7 @@ use jni::{
     sys::{jint, jlong},
     JNIEnv, NativeMethod,
 };
-use crate::{DialogCallback, Error, File, Result};
+use crate::{DialogCallback, Error, PickedFile, Result};
 
 const FILE_PICKER_FRAGMENT_BYTECODE: &[u8] = include_bytes!(
     concat!(env!("OUT_DIR"), "/classes.dex")
@@ -55,7 +55,7 @@ unsafe extern "C" fn rust_callback<'a>(
                         let display_name = optional_jstring(&mut env, &display_name);
                         let mime_type = optional_jstring(&mut env, &mime_type);
                         let size = (size >= 0).then_some(size as u64);
-                        Ok(Some(File::from_uri_with_metadata(
+                        Ok(Some(PickedFile::from_uri_with_metadata(
                             uri,
                             display_name,
                             mime_type,
