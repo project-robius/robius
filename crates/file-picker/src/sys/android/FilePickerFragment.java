@@ -9,6 +9,7 @@ package robius.file_picker;
 import android.Manifest;
 import android.app.Activity;
 import android.app.Fragment;
+import android.app.FragmentTransaction;
 import android.content.ActivityNotFoundException;
 import android.content.ContentResolver;
 import android.content.ContentValues;
@@ -29,6 +30,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -226,12 +228,31 @@ public class FilePickerFragment extends Fragment {
         if (activity.isFinishing() || activity.isDestroyed()) {
             return false;
         }
-        if (activity.getFragmentManager().findFragmentByTag(FRAGMENT_TAG) != null) {
-            return false;
+
+        FragmentTransaction transaction = null;
+        List<Fragment> fragments = activity.getFragmentManager().getFragments();
+        if (fragments != null) {
+            for (Fragment existing : fragments) {
+                if (!(existing instanceof FilePickerFragment)) {
+                    continue;
+                }
+
+                FilePickerFragment picker = (FilePickerFragment) existing;
+                if (picker.hasCallback()) {
+                    return false;
+                }
+
+                if (transaction == null) {
+                    transaction = activity.getFragmentManager().beginTransaction();
+                }
+                transaction.remove(picker);
+            }
         }
-        activity
-                .getFragmentManager()
-                .beginTransaction()
+
+        if (transaction == null) {
+            transaction = activity.getFragmentManager().beginTransaction();
+        }
+        transaction
                 .add(fragment, FRAGMENT_TAG)
                 .commitNowAllowingStateLoss();
         return true;
@@ -445,6 +466,10 @@ public class FilePickerFragment extends Fragment {
         long callback = callbackPtr;
         callbackPtr = 0;
         return callback;
+    }
+
+    private synchronized boolean hasCallback() {
+        return callbackPtr != 0;
     }
 
     private void finish(int resultCode, String uri) {
