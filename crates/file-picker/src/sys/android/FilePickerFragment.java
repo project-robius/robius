@@ -316,16 +316,15 @@ public class FilePickerFragment extends Fragment {
         final String uriString = dataUri.toString();
 
         if (save) {
-            // The user has chosen a destination, so the save operation now owns
-            // the callback. Destroying this fragment while copying should not
-            // report cancellation.
+            // If the user picked a save destination already, don't cancel even if
+            // this fragment gets randomly destroyed for some reason.
             final long callback = claimCallback();
             if (callback == 0) {
                 removeSelf();
                 return;
             }
 
-            // Writing the file might be slow, so don't do it on the main UI thread.
+            // Writing the file might be slow; don't do it on the main UI thread, duh.
             final Activity callbackActivity = activity;
             new Thread(
                 () -> {
@@ -474,9 +473,8 @@ public class FilePickerFragment extends Fragment {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        // If the fragment is destroyed before a result was delivered,
-        // deliver a cancellation result to the native callback, which ensures
-        // that it always runs exactly once.
+        // If the fragment gets destroyed, deliver a cancellation result
+        // to ensure the callback always runs exactly once.
         long callback = claimCallback();
         if (callback != 0) {
             rustCallback(callback, Activity.RESULT_CANCELED, null, null, null, -1);

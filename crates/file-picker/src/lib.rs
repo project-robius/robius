@@ -183,8 +183,7 @@ impl FileDialog {
     /// Shows a native open-file dialog.
     ///
     /// The callback is called with `Ok(None)` if the user cancels the dialog.
-    /// Returns [`Error::AlreadyOpen`] if the active native UI context is already
-    /// presenting a picker.
+    /// Returns [`Error::AlreadyOpen`] if a dialow is already being shown.
     pub fn pick_file<F>(self, on_completion: F) -> Result<()>
     where
         F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
@@ -232,8 +231,7 @@ impl FileDialog {
     /// With no explicit location set, defaults the start location to Pictures or
     /// Videos, which only the desktop dialog and document-picker fallbacks use.
     ///
-    /// Returns [`Error::AlreadyOpen`] if the active native UI context is already
-    /// presenting a picker.
+    /// Returns [`Error::AlreadyOpen`] if a dialow is already being shown.
     pub fn pick_media<F>(mut self, media_kind: MediaKind, on_completion: F) -> Result<()>
     where
         F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
@@ -251,8 +249,7 @@ impl FileDialog {
     ///
     /// You should first set a file name via [`FileDialog::set_file_name`],
     /// otherwise this will return [`Error::InvalidFileName`].
-    /// Returns [`Error::AlreadyOpen`] if the active native UI context is already
-    /// presenting a picker.
+    /// Returns [`Error::AlreadyOpen`] if a dialow is already being shown.
     pub fn save_data<D, F>(self, data: D, on_completion: F) -> Result<()>
     where
         D: AsRef<[u8]> + Send + 'static,
