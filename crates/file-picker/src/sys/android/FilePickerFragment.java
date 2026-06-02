@@ -18,6 +18,7 @@ import android.database.Cursor;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.os.Environment;
@@ -28,6 +29,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class FilePickerFragment extends Fragment {
     private static final int REQUEST_CODE = 0x526f;
@@ -37,6 +40,7 @@ public class FilePickerFragment extends Fragment {
     private static final int MEDIA_KIND_VIDEO = 2;
     private static final int MEDIA_KIND_PHOTO_OR_VIDEO = 3;
     private static final int API_Q = 29;
+    private static final String FRAGMENT_TAG = "robius.file_picker.FilePickerFragment";
     private static final String ACTION_PICK_IMAGES = "android.provider.action.PICK_IMAGES";
     private static final String COLUMN_DISPLAY_NAME = "_display_name";
     private static final String COLUMN_MIME_TYPE = "mime_type";
@@ -97,7 +101,7 @@ public class FilePickerFragment extends Fragment {
         this.launched = false;
     }
 
-    public static void show(
+    public static boolean show(
             Activity activity,
             long callbackPtr,
             boolean save,
@@ -119,14 +123,10 @@ public class FilePickerFragment extends Fragment {
                 initialLocationDir,
                 MEDIA_KIND_NONE);
 
-        activity
-                .getFragmentManager()
-                .beginTransaction()
-                .add(fragment, "robius.file_picker.FilePickerFragment." + callbackPtr)
-                .commitAllowingStateLoss();
+        return showFragment(activity, fragment);
     }
 
-    public static void saveData(
+    public static boolean saveData(
             Activity activity,
             long callbackPtr,
             String fileName,
@@ -147,14 +147,10 @@ public class FilePickerFragment extends Fragment {
                 initialLocationDir,
                 MEDIA_KIND_NONE);
 
-        activity
-                .getFragmentManager()
-                .beginTransaction()
-                .add(fragment, "robius.file_picker.FilePickerFragment." + callbackPtr)
-                .commitAllowingStateLoss();
+        return showFragment(activity, fragment);
     }
 
-    public static void pickMedia(
+    public static boolean pickMedia(
             Activity activity,
             long callbackPtr,
             int mediaKind,
@@ -171,22 +167,17 @@ public class FilePickerFragment extends Fragment {
                 null,
                 mediaKind);
 
-        activity
-                .getFragmentManager()
-                .beginTransaction()
-                .add(fragment, "robius.file_picker.FilePickerFragment." + callbackPtr)
-                .commitAllowingStateLoss();
+        return showFragment(activity, fragment);
     }
 
-    public static void saveToDownloads(
+    public static boolean saveToDownloads(
             Activity activity,
             long callbackPtr,
             String fileName,
             String mimeType,
             String sourcePath) {
         if (!canWriteDownloadsDirectly(activity)) {
-            show(activity, callbackPtr, true, null, fileName, sourcePath, mimeType, null, null);
-            return;
+            return show(activity, callbackPtr, true, null, fileName, sourcePath, mimeType, null, null);
         }
 
         new Thread(() -> {
@@ -204,6 +195,46 @@ public class FilePickerFragment extends Fragment {
 
             rustCallback(callbackPtr, resultCode, uri, null, null, -1);
         }, "robius-file-picker-save-to-downloads").start();
+        return true;
+    }
+
+    private static boolean showFragment(Activity activity, FilePickerFragment fragment) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return showFragmentOnUiThread(activity, fragment);
+        }
+
+        AtomicBoolean result = new AtomicBoolean(false);
+        CountDownLatch latch = new CountDownLatch(1);
+        activity.runOnUiThread(() -> {
+            try {
+                result.set(showFragmentOnUiThread(activity, fragment));
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        return result.get();
+    }
+
+    private static boolean showFragmentOnUiThread(Activity activity, FilePickerFragment fragment) {
+        if (activity.isFinishing() || activity.isDestroyed()) {
+            return false;
+        }
+        if (activity.getFragmentManager().findFragmentByTag(FRAGMENT_TAG) != null) {
+            return false;
+        }
+        activity
+                .getFragmentManager()
+                .beginTransaction()
+                .add(fragment, FRAGMENT_TAG)
+                .commitNowAllowingStateLoss();
+        return true;
     }
 
     @Override
@@ -259,10 +290,12 @@ public class FilePickerFragment extends Fragment {
 
         if (save) {
             // Writing the file might be slow, so don't do it on the main UI thread.
+            final Activity callbackActivity = activity;
             new Thread(
                 () -> {
                     boolean ok = copySourceToUri(resolver, dataUri);
-                    finish(ok ? okCode : RESULT_ERROR, ok ? uriString : null);
+                    callbackActivity.runOnUiThread(
+                            () -> finish(ok ? okCode : RESULT_ERROR, ok ? uriString : null));
                 },
                 "robius-file-picker-save"
             ).start();
@@ -400,7 +433,7 @@ public class FilePickerFragment extends Fragment {
     public void onDestroy() {
         super.onDestroy();
         // If the fragment is destroyed before a result was delivered,
-        // deliver a cancelation result to the native callback, which ensures
+        // deliver a cancellation result to the native callback, which ensures
         // that is always runs exactly once.
         long callback = claimCallback();
         if (callback != 0) {

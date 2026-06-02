@@ -12,7 +12,7 @@ use objc2::{
     define_class, extern_class, extern_conformance, extern_methods, extern_protocol, msg_send,
     rc::{Allocated, Retained},
     runtime::{AnyClass, ProtocolObject},
-    AnyThread, DeclaredClass, MainThreadMarker, MainThreadOnly,
+    AnyThread, ClassType, DeclaredClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_foundation::{
     NSArray, NSError, NSItemProvider, NSObject, NSObjectProtocol, NSString, NSURL,
@@ -22,8 +22,9 @@ use objc2_photos_ui::{
     PHPickerResult,
 };
 use objc2_ui_kit::{
-    UIApplication, UIDocumentPickerDelegate, UIDocumentPickerViewController, UIResponder,
-    UIViewController,
+    UIApplication, UIAdaptivePresentationControllerDelegate, UIDocumentPickerDelegate,
+    UIDocumentPickerViewController, UIPresentationController, UIResponder, UIViewController,
+    UIWindow,
 };
 use objc2_uniform_type_identifiers::{UTType, UTTypeImage, UTTypeItem, UTTypeMovie};
 
@@ -210,6 +211,14 @@ define_class!(
             self.finish(Ok(None));
         }
     }
+
+    unsafe impl UIAdaptivePresentationControllerDelegate for RobiusDocumentPickerDelegate {
+        #[unsafe(method(presentationControllerDidDismiss:))]
+        #[allow(non_snake_case)]
+        unsafe fn presentationControllerDidDismiss(&self, _: &UIPresentationController) {
+            self.finish(Ok(None));
+        }
+    }
 );
 
 define_class!(
@@ -228,6 +237,14 @@ define_class!(
             results: &NSArray<PHPickerResult>,
         ) {
             self.finish(picker, results);
+        }
+    }
+
+    unsafe impl UIAdaptivePresentationControllerDelegate for RobiusMediaPickerDelegate {
+        #[unsafe(method(presentationControllerDidDismiss:))]
+        #[allow(non_snake_case)]
+        unsafe fn presentationControllerDidDismiss(&self, _: &UIPresentationController) {
+            self.cancel();
         }
     }
 );
@@ -279,9 +296,16 @@ impl RobiusMediaPickerDelegate {
         self.ivars().pending.set(pending);
     }
 
-    fn finish(&self, picker: &PHPickerViewController, results: &NSArray<PHPickerResult>) {
-        dismiss_media_picker(picker);
+    fn cancel(&self) {
         let pending = self.ivars().pending.replace(ptr::null_mut());
+        if !pending.is_null() {
+            finish_media_picker(pending, Ok(None));
+        }
+    }
+
+    fn finish(&self, picker: &PHPickerViewController, results: &NSArray<PHPickerResult>) {
+        let pending = self.ivars().pending.replace(ptr::null_mut());
+        dismiss_media_picker(picker);
         if pending.is_null() { return; }
 
         let Some(result) = results.iter().next() else {
@@ -340,7 +364,7 @@ fn show_inner(
     kind: DialogKind,
     on_completion: DialogCallback,
 ) -> Result<()> {
-    let presenter = presenting_view_controller(mtm).ok_or(Error::Unknown)?;
+    let presenter = presenting_view_controller(mtm)?;
     let delegate = RobiusDocumentPickerDelegate::new(mtm);
 
     let (picker, temp_path) = match kind {
@@ -411,9 +435,12 @@ fn show_inner(
 
     // Safe upcast: `UIDocumentPickerViewController`'s superclass is `UIViewController`.
     let picker_view_controller: Retained<UIViewController> = picker.into_super();
+    let presentation_delegate = ProtocolObject::from_ref(&*delegate);
+    set_presentation_delegate(&picker_view_controller, presentation_delegate);
     unsafe {
         presenter.presentViewController_animated_completion(&picker_view_controller, true, None);
     }
+    set_presentation_delegate(&picker_view_controller, presentation_delegate);
 
     Ok(())
 }
@@ -434,7 +461,7 @@ fn show_media_inner(
         );
     }
 
-    let presenter = presenting_view_controller(mtm).ok_or(Error::Unknown)?;
+    let presenter = presenting_view_controller(mtm)?;
     let configuration = unsafe { PHPickerConfiguration::init(PHPickerConfiguration::alloc()) };
     let filter = media_filter(media_kind);
 
@@ -471,27 +498,71 @@ fn show_media_inner(
 
     // Safe upcast: `PHPickerViewController`'s superclass is `UIViewController`.
     let picker_view_controller: Retained<UIViewController> = picker.into_super();
+    let presentation_delegate = ProtocolObject::from_ref(&*delegate);
+    set_presentation_delegate(&picker_view_controller, presentation_delegate);
     unsafe {
         presenter.presentViewController_animated_completion(&picker_view_controller, true, None);
     }
+    set_presentation_delegate(&picker_view_controller, presentation_delegate);
 
     Ok(())
 }
 
-fn presenting_view_controller(mtm: MainThreadMarker) -> Option<Retained<UIViewController>> {
+fn set_presentation_delegate(
+    controller: &UIViewController,
+    delegate: &ProtocolObject<dyn UIAdaptivePresentationControllerDelegate>,
+) {
+    if let Some(presentation_controller) = unsafe { controller.presentationController() } {
+        unsafe {
+            presentation_controller.setDelegate(Some(delegate));
+        }
+    }
+}
+
+fn presenting_view_controller(mtm: MainThreadMarker) -> Result<Retained<UIViewController>> {
     let application = UIApplication::sharedApplication(mtm);
+    let window = active_window(&application).ok_or(Error::Unknown)?;
+    let root = window.rootViewController().ok_or(Error::Unknown)?;
+    top_presenting_view_controller(root)
+}
+
+fn active_window(application: &UIApplication) -> Option<Retained<UIWindow>> {
+    #[allow(deprecated)]
+    if let Some(window) = unsafe { application.keyWindow() } {
+        return Some(window);
+    }
 
     #[allow(deprecated)]
-    let window = unsafe { application.keyWindow() }.or_else(|| {
-        #[allow(deprecated)]
-        application.windows().iter().next()
-    })?;
+    let windows = application.windows();
+    windows
+        .iter()
+        .find(|window| window.isKeyWindow())
+        .or_else(|| windows.iter().next())
+}
 
-    let mut controller = window.rootViewController()?;
-    while let Some(presented) = unsafe { controller.presentedViewController() } {
+fn top_presenting_view_controller(
+    mut controller: Retained<UIViewController>,
+) -> Result<Retained<UIViewController>> {
+    loop {
+        if is_file_picker_controller(&controller) {
+            return Err(Error::AlreadyOpen);
+        }
+        let Some(presented) = (unsafe { controller.presentedViewController() }) else {
+            return Ok(controller);
+        };
         controller = presented;
     }
-    Some(controller)
+}
+
+fn is_file_picker_controller(controller: &UIViewController) -> bool {
+    if controller.isKindOfClass(UIDocumentPickerViewController::class()) {
+        return true;
+    }
+
+    let picker_class = CStr::from_bytes_with_nul(b"PHPickerViewController\0").unwrap();
+    AnyClass::get(picker_class)
+        .map(|class| controller.isKindOfClass(class))
+        .unwrap_or(false)
 }
 
 fn media_filter(media_kind: MediaKind) -> Retained<PHPickerFilter> {
