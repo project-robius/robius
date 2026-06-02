@@ -206,20 +206,26 @@ public class FilePickerFragment extends Fragment {
         }
 
         AtomicBoolean result = new AtomicBoolean(false);
-        CountDownLatch latch = new CountDownLatch(1);
+        CountDownLatch uiThreadFinished = new CountDownLatch(1);
         activity.runOnUiThread(() -> {
             try {
                 result.set(showFragmentOnUiThread(activity, fragment));
             } finally {
-                latch.countDown();
+                uiThreadFinished.countDown();
             }
         });
 
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                uiThreadFinished.await();
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
             Thread.currentThread().interrupt();
-            return false;
         }
         return result.get();
     }
@@ -310,13 +316,28 @@ public class FilePickerFragment extends Fragment {
         final String uriString = dataUri.toString();
 
         if (save) {
+            // The user has chosen a destination, so the save operation now owns
+            // the callback. Destroying this fragment while copying should not
+            // report cancellation.
+            final long callback = claimCallback();
+            if (callback == 0) {
+                removeSelf();
+                return;
+            }
+
             // Writing the file might be slow, so don't do it on the main UI thread.
             final Activity callbackActivity = activity;
             new Thread(
                 () -> {
                     boolean ok = copySourceToUri(resolver, dataUri);
-                    callbackActivity.runOnUiThread(
-                            () -> finish(ok ? okCode : RESULT_ERROR, ok ? uriString : null));
+                    rustCallback(
+                            callback,
+                            ok ? okCode : RESULT_ERROR,
+                            ok ? uriString : null,
+                            null,
+                            null,
+                            -1);
+                    callbackActivity.runOnUiThread(this::removeSelf);
                 },
                 "robius-file-picker-save"
             ).start();
@@ -455,7 +476,7 @@ public class FilePickerFragment extends Fragment {
         super.onDestroy();
         // If the fragment is destroyed before a result was delivered,
         // deliver a cancellation result to the native callback, which ensures
-        // that is always runs exactly once.
+        // that it always runs exactly once.
         long callback = claimCallback();
         if (callback != 0) {
             rustCallback(callback, Activity.RESULT_CANCELED, null, null, null, -1);
@@ -483,6 +504,10 @@ public class FilePickerFragment extends Fragment {
             rustCallback(callback, resultCode, uri, displayName, mimeType, size);
         }
 
+        removeSelf();
+    }
+
+    private void removeSelf() {
         if (getFragmentManager() != null) {
             getFragmentManager()
                     .beginTransaction()
