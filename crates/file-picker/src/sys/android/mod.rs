@@ -347,10 +347,10 @@ fn show_inner(
         .map(|loc| loc.as_ref())
         .unwrap_or(&null);
 
-    env.call_static_method(
+    let shown = env.call_static_method(
         fragment_class,
         "show",
-        "(Landroid/app/Activity;JZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)V",
+        "(Landroid/app/Activity;JZLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Z",
         &[
             JValueGen::Object(activity),
             JValueGen::Long(callback_ptr as i64),
@@ -362,9 +362,9 @@ fn show_inner(
             JValueGen::Object(mime_types),
             JValueGen::Object(initial_location),
         ],
-    )?;
+    )?.z()?;
 
-    Ok(())
+    shown.then_some(()).ok_or(Error::AlreadyOpen)
 }
 
 fn save_to_downloads_inner(
@@ -380,10 +380,10 @@ fn save_to_downloads_inner(
     let mime_type = env.new_string(mime_type)?;
     let source_path = env.new_string(source_path)?;
 
-    env.call_static_method(
+    let accepted = env.call_static_method(
         fragment_class,
         "saveToDownloads",
-        "(Landroid/app/Activity;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        "(Landroid/app/Activity;JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
         &[
             JValueGen::Object(activity),
             JValueGen::Long(callback_ptr as i64),
@@ -391,9 +391,9 @@ fn save_to_downloads_inner(
             JValueGen::Object(mime_type.as_ref()),
             JValueGen::Object(source_path.as_ref()),
         ],
-    )?;
+    )?.z()?;
 
-    Ok(())
+    accepted.then_some(()).ok_or(Error::AlreadyOpen)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -436,10 +436,10 @@ fn save_data_inner(
         .map(|loc| loc.as_ref())
         .unwrap_or(&null);
 
-    env.call_static_method(
+    let shown = env.call_static_method(
         fragment_class,
         "saveData",
-        "(Landroid/app/Activity;JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)V",
+        "(Landroid/app/Activity;JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)Z",
         &[
             JValueGen::Object(activity),
             JValueGen::Long(callback_ptr as i64),
@@ -450,9 +450,9 @@ fn save_data_inner(
             JValueGen::Object(initial_location),
             JValueGen::Object(&data_array.into()),
         ],
-    )?;
+    )?.z()?;
 
-    Ok(())
+    shown.then_some(()).ok_or(Error::AlreadyOpen)
 }
 
 fn pick_media_inner(
@@ -470,19 +470,19 @@ fn pick_media_inner(
         .transpose()?;
     let title = title.as_ref().map(|title| title.as_ref()).unwrap_or(&null);
 
-    env.call_static_method(
+    let shown = env.call_static_method(
         fragment_class,
         "pickMedia",
-        "(Landroid/app/Activity;JILjava/lang/String;)V",
+        "(Landroid/app/Activity;JILjava/lang/String;)Z",
         &[
             JValueGen::Object(activity),
             JValueGen::Long(callback_ptr as i64),
             JValueGen::Int(android_media_kind(media_kind)),
             JValueGen::Object(title),
         ],
-    )?;
+    )?.z()?;
 
-    Ok(())
+    shown.then_some(()).ok_or(Error::AlreadyOpen)
 }
 
 fn android_media_kind(media_kind: MediaKind) -> i32 {

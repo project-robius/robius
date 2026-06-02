@@ -41,7 +41,6 @@ mod error;
 mod sys;
 
 use std::{path::{Path, PathBuf}, sync::Arc};
-use picker_guard::lock_single_dialog;
 
 pub use error::{Error, Result};
 pub(crate) type DialogCallback = Box<dyn FnOnce(Result<Option<PickedFile>>) + Send + 'static>;
@@ -184,12 +183,12 @@ impl FileDialog {
     /// Shows a native open-file dialog.
     ///
     /// The callback is called with `Ok(None)` if the user cancels the dialog.
-    /// Returns [`Error::AlreadyOpen`] if a dialog is already open.
+    /// Returns [`Error::AlreadyOpen`] if a dialow is already being shown.
     pub fn pick_file<F>(self, on_completion: F) -> Result<()>
     where
         F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
-        sys::pick_file(self.options, lock_single_dialog(Box::new(on_completion))?)
+        sys::pick_file(self.options, Box::new(on_completion))
     }
 
     /// Shows the platform's native image picker.
@@ -232,7 +231,7 @@ impl FileDialog {
     /// With no explicit location set, defaults the start location to Pictures or
     /// Videos, which only the desktop dialog and document-picker fallbacks use.
     ///
-    /// Returns [`Error::AlreadyOpen`] if a dialog is already open.
+    /// Returns [`Error::AlreadyOpen`] if a dialow is already being shown.
     pub fn pick_media<F>(mut self, media_kind: MediaKind, on_completion: F) -> Result<()>
     where
         F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
@@ -243,20 +242,20 @@ impl FileDialog {
                 MediaKind::Video => StartLocation::Videos,
             });
         }
-        sys::pick_media(self.options, media_kind, lock_single_dialog(Box::new(on_completion))?)
+        sys::pick_media(self.options, media_kind, Box::new(on_completion))
     }
 
     /// Saves the given `data` bytes to a user-specific location via platform-native operations.
     ///
     /// You should first set a file name via [`FileDialog::set_file_name`],
     /// otherwise this will return [`Error::InvalidFileName`].
-    /// Returns [`Error::AlreadyOpen`] if a dialog is already open.
+    /// Returns [`Error::AlreadyOpen`] if a dialow is already being shown.
     pub fn save_data<D, F>(self, data: D, on_completion: F) -> Result<()>
     where
         D: AsRef<[u8]> + Send + 'static,
         F: FnOnce(Result<Option<PickedFile>>) + Send + 'static,
     {
-        sys::save_data(self.options, Box::new(data), lock_single_dialog(Box::new(on_completion))?)
+        sys::save_data(self.options, Box::new(data), Box::new(on_completion))
     }
 
     /// Saves a file to the user's Downloads location.
@@ -629,42 +628,4 @@ enum FileLocation {
         owned_temp: bool,
     },
     Uri(String),
-}
-
-mod picker_guard {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    /// Whether a native dialog/picker is currently being shown
-    static DIALOG_OPEN: AtomicBool = AtomicBool::new(false);
-
-    /// A guard type that enforces our invariant that only one picker/dialog can be open at at time.
-    struct PickerGuard;
-    impl PickerGuard {
-        fn acquire() -> Option<Self> {
-            if DIALOG_OPEN.swap(true, Ordering::SeqCst) {
-                None
-            } else {
-                Some(Self)
-            }
-        }
-    }
-    impl Drop for PickerGuard {
-        fn drop(&mut self) {
-            DIALOG_OPEN.store(false, Ordering::SeqCst);
-        }
-    }
-
-    /// A convenience function for ensuring a single picker/dialog is open
-    /// for the duration of the given `on_completion` callback being invoked.
-    ///
-    /// Returns [`Error::AlreadyOpen`] if a picker dialog is already open.
-    pub(crate) fn lock_single_dialog(
-        on_completion: crate::DialogCallback,
-    ) -> crate::Result<crate::DialogCallback> {
-        let guard = PickerGuard::acquire().ok_or(crate::Error::AlreadyOpen)?;
-        Ok(Box::new(move |result| {
-            let _guard = guard;
-            on_completion(result);
-        }))
-    }
 }

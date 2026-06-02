@@ -54,6 +54,7 @@ objc2-ui-kit = { workspace = true, features = [
     "alloc",
     "block2",
     "UIApplication",
+    "UIPresentationController",
     "UIDocumentPickerViewController",
     "UIResponder",
     "UIView",

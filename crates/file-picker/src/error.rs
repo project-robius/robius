@@ -15,7 +15,8 @@ pub enum Error {
     Io(std::io::Error),
     /// The provided file name isn't valid on the current platform.
     InvalidFileName,
-    /// Another dialog/picker is already open. Only one can be shown at a time.
+    /// The native UI is already showing a file picker.
+    /// The user must cancel that one and try again.
     AlreadyOpen,
     /// This platform is unsupported.
     Unsupported,
