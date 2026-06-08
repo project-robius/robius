@@ -1,0 +1,85 @@
+[package]
+name = "robius-share"
+version.workspace = true
+edition.workspace = true
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for showing native system share sheets on multiple platforms"
+documentation = "https://docs.rs/robius-share"
+homepage.workspace = true
+keywords = ["robius", "share", "sheet", "intent", "native"]
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+
+## Note: ideally this would be only included when we're building for Android,
+## but Cargo doesn't support target-specific build scripts yet.
+## See: <https://github.com/rust-lang/cargo/issues/4932> and
+## <https://github.com/rust-lang/cargo/issues/14378#issuecomment-2278333431>.
+[build-dependencies]
+android-build.workspace = true
+
+
+[dependencies]
+cfg-if.workspace = true
+
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+robius-android-env.workspace = true
+
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+dispatch2 = { workspace = true, features = ["objc2"] }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = [
+    "NSArray",
+    "NSEnumerator",
+    "NSObject",
+    "NSString",
+    "NSURL",
+] }
+
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-ui-kit = { workspace = true, features = [
+    "UIApplication",
+    "UIActivity",
+    "UIActivityViewController",
+    "UIPopoverPresentationController",
+    "UIPresentationController",
+    "UIResponder",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "block2",
+    "objc2-core-foundation",
+] }
+
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { workspace = true, features = [
+    "NSApplication",
+    "NSResponder",
+    "NSSharingService",
+    "NSView",
+    "NSWindow",
+    "objc2-core-foundation",
+] }
+
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "ApplicationModel_DataTransfer",
+    "Foundation",
+    "Foundation_Collections",
+    "implement",
+    "Storage",
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

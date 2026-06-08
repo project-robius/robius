@@ -1,0 +1,22 @@
+[workspace]
+
+[package]
+name = "robius-examples"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "share_example_makepad"
+path = "src/bin/share_example_makepad.rs"
+
+[dependencies]
+makepad-widgets = { path = "../../../makepad/widgets" }
+robius-file-picker = { path = "../file-picker" }
+robius-share = { path = "../share" }
+robius-use-makepad = { path = "../../../robius-use-makepad" }

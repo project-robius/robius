@@ -487,6 +487,7 @@ dependencies = [
  "bitflags 2.9.1",
  "block2",
  "objc2",
+ "objc2-core-foundation",
  "objc2-foundation",
 ]
 
@@ -572,6 +573,7 @@ dependencies = [
  "bitflags 2.9.1",
  "block2",
  "objc2",
+ "objc2-core-foundation",
  "objc2-foundation",
  "objc2-uniform-type-identifiers",
 ]
@@ -883,6 +885,22 @@ dependencies = [
  "dispatch2",
  "jni",
  "log",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-ui-kit",
+ "robius-android-env",
+ "windows",
+]
+
+[[package]]
+name = "robius-share"
+version = "0.2.0"
+dependencies = [
+ "android-build",
+ "cfg-if",
+ "dispatch2",
+ "jni",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

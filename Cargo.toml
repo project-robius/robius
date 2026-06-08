@@ -5,6 +5,10 @@ members = [
     "crates/*",
 ]
 
+exclude = [
+    "crates/examples",
+]
+
 # Note: we haven't yet implemented the top-level crate of re-exports.
 #
 # ## The top-level crate just re-exports the contents of each sub-crate
