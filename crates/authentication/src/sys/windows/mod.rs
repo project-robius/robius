@@ -69,6 +69,13 @@ impl Context {
 #[derive(Debug)]
 pub(crate) struct Policy;
 
+impl Policy {
+    #[inline]
+    pub(crate) fn set_action_id(&mut self, _: String) -> Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct PolicyBuilder {
     valid: bool,
@@ -100,6 +107,10 @@ impl PolicyBuilder {
     }
 
     pub(crate) const fn wrist_detection(self, _: bool) -> Self {
+        self
+    }
+
+    pub(crate) fn action_ids(self, _: Vec<String>) -> Self {
         self
     }
 

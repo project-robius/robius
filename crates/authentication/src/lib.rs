@@ -46,21 +46,11 @@
 //!     .expect("authentication failed");
 //! ```
 //!
-//! The `Policy` and `Text` structs can also be constructed at compile-time to
-//! avoid run-time unwraps:
+//! The `Text` struct can also be constructed at compile-time to avoid run-time unwraps:
 //! ```
 //! #![feature(const_option)]
 //!
-//! use robius_authentication::{
-//!     AndroidText, BiometricStrength, Policy, PolicyBuilder, Text, WindowsText,
-//! };
-//!
-//! const POLICY: Policy = PolicyBuilder::new()
-//!     .biometrics(Some(BiometricStrength::Strong))
-//!     .password(true)
-//!     .companion(true)
-//!     .build()
-//!     .unwrap();
+//! use robius_authentication::{AndroidText, Text, WindowsText};
 //!
 //! const TEXT: Text = Text {
 //!     android: AndroidText {
@@ -142,6 +132,14 @@ impl Context {
     /// Note that the callback may be not be called at all,
     /// but will always be called upon success.
     ///
+    /// On Linux: `message` is unused because polkit looks up the prompt text from the
+    /// action definition in the installed `.policy` file (its `<message>`/`<description>`).
+    /// The client only supplies an action ID to `CheckAuthorization`, and there is no
+    /// stable, cross-agent way to override that UI text at runtime.
+    /// If you need multiple prompt strings, define multiple actions in the policy file
+    /// and select the desired one via `PolicyBuilder::action_ids` and
+    /// `Policy::set_action_id` before each authentication.
+    ///
     /// Thus, authentication failed if this function returns an error
     /// **OR** if the `callback` is invoked with `Err(_)`.
     #[inline]
@@ -178,6 +176,9 @@ pub enum BiometricStrength {
 /// when being requested to enable/disable various authentication methods.
 /// Enabling all options is the safest way to ensure that the authentication prompt
 /// will be displayed correctly on all platforms.
+///
+/// On Linux, at least one polkit action ID *MUST* be explicitly provided.
+/// If not set (or empty), `build()` will return None.
 #[derive(Debug)]
 pub struct PolicyBuilder {
     inner: sys::PolicyBuilder,
@@ -199,13 +200,40 @@ impl PolicyBuilder {
         }
     }
 
+    /// Sets the list of action identifiers that require authorization.
+    ///
+    /// On Linux systems, these map to polkit `action_id`s, which represent
+    /// specific privileged operations (such as modifying system settings or
+    /// powering off the device). The authentication backend uses the current
+    /// action ID to determine whether the action is permitted and whether
+    /// user authentication is required.
+    ///
+    /// The first entry is used as the default action ID. To switch between
+    /// multiple action IDs at runtime on Linux, build a policy once and call
+    /// [`Policy::set_action_id`] before each authentication. The setter
+    /// validates against this list.
+    ///
+    /// This only has an effect on linux.
+    #[inline]
+    #[must_use]
+    pub fn action_ids<I, S>(self, ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let ids = ids.into_iter().map(Into::into).collect::<Vec<String>>();
+        Self {
+            inner: self.inner.action_ids(ids),
+        }
+    }
+
     /// Configures biometric authentication with the given strength.
     ///
     /// The strength only has an effect on Android, see [`BiometricStrength`]
     /// for more details.
     #[inline]
     #[must_use]
-    pub const fn biometrics(self, strength: Option<BiometricStrength>) -> Self {
+    pub fn biometrics(self, strength: Option<BiometricStrength>) -> Self {
         Self {
             inner: self.inner.biometrics(strength),
         }
@@ -214,7 +242,7 @@ impl PolicyBuilder {
     /// Sets whether the policy supports passwords.
     #[inline]
     #[must_use]
-    pub const fn password(self, password: bool) -> Self {
+    pub fn password(self, password: bool) -> Self {
         Self {
             inner: self.inner.password(password),
         }
@@ -225,7 +253,7 @@ impl PolicyBuilder {
     /// This only has an effect on iOS and macOS.
     #[inline]
     #[must_use]
-    pub const fn companion(self, companion: bool) -> Self {
+    pub fn companion(self, companion: bool) -> Self {
         Self {
             inner: self.inner.companion(companion),
         }
@@ -236,7 +264,7 @@ impl PolicyBuilder {
     /// This only has an effect on Apple watchOS.
     #[inline]
     #[must_use]
-    pub const fn wrist_detection(self, wrist_detection: bool) -> Self {
+    pub fn wrist_detection(self, wrist_detection: bool) -> Self {
         Self {
             inner: self.inner.wrist_detection(wrist_detection),
         }
@@ -248,7 +276,7 @@ impl PolicyBuilder {
     /// current target.
     #[inline]
     #[must_use]
-    pub const fn build(self) -> Option<Policy> {
+    pub fn build(self) -> Option<Policy> {
         Some(Policy {
             inner: match self.inner.build() {
                 Some(inner) => inner,
@@ -262,4 +290,17 @@ impl PolicyBuilder {
 #[derive(Debug)]
 pub struct Policy {
     inner: sys::Policy,
+}
+
+impl Policy {
+    /// Sets the polkit action ID used on Linux.
+    ///
+    /// Returns [`Error::InvalidActionId`] if the ID is not in the allowed list
+    /// provided via [`PolicyBuilder::action_ids`].
+    ///
+    /// This is a no-op on non-Linux platforms.
+    #[inline]
+    pub fn set_action_id(&mut self, id: impl Into<String>) -> Result<()> {
+        self.inner.set_action_id(id.into())
+    }
 }

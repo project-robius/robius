@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Template Policy File -->
+<policyconfig>
+  <!-- Optional metadata. Some agents use these for display. -->
+  <vendor>Your vendor name</vendor>
+  <vendor_url>Your vendor url</vendor_url>
+  <!-- Icon name from the icon theme (e.g., /usr/share/icons). If missing, a default icon is shown. -->
+  <icon_name>Your icon name</icon_name>
+
+  <!-- ⚠️ Replace action id -->
+  <action id="org.robius.authentication">
+    <description>Authenticate to use YourApp</description>
+    <!-- The main authentication message -->
+    <message>Authentication is required</message>
+      <defaults>
+      <!-- Equivalent to: implicit any: no -->
+      <allow_any>no</allow_any>
+      <!-- Equivalent to: implicit inactive: no -->
+      <allow_inactive>no</allow_inactive>
+      <!-- Equivalent to: implicit active: auth_admin_keep -->
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <!-- ⚠️ Replace action id -->
+  <action id="org.robius.authentication.settings">
+    <description>Authenticate to change settings</description>
+    <message>Authentication is required to change settings.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
+  <!-- Define your more actions -->
+</policyconfig>
