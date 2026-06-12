@@ -39,6 +39,4 @@ objc2-foundation = { workspace = true, features = ["NSString", "NSURL"] }
 windows = { workspace = true, features = [ "Foundation", "System" ] }
 
 [features]
-default = ["android-result"]
-android-result = []
 log = ["dep:log"]

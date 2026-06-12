@@ -27,26 +27,6 @@
 //!    })
 //!    .expect("failed to open URL");
 //! ```
-//! 
-//! 
-//! ## Android usage
-//! To use this crate on Android with the default `android-result` feature enabled,
-//! you must add the following to your app manifest:
-//! ```xml
-//! <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-//!    tools:ignore="QueryAllPackagesPermission" />
-//! 
-//! <queries>
-//!    <intent>
-//!       <action android:name="android.intent.action.MAIN" />
-//!    </intent>
-//! </queries>
-//! ```
-//! 
-//! Alternatively, you can omit those permissions if you disable the `android-result` feature,
-//! but that will then cause `Uri::open()` to always return `Ok`
-//! (and the `on_completion` closure to always receive a success value of `true`)
-//! regardless of whether the URI was actually opened successfully.
 
 #![allow(clippy::result_unit_err)]
 

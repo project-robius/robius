@@ -1,0 +1,50 @@
+[package]
+name = "robius-web-auth-session"
+version.workspace = true
+edition.workspace = true
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for native OS web authentication sessions (OAuth/SSO), like iOS ASWebAuthenticationSession"
+documentation = "https://docs.rs/robius-web-auth-session"
+homepage.workspace = true
+keywords = ["robius", "authentication", "oauth", "sso", "web"]
+categories.workspace = true
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
+
+[dependencies]
+cfg-if.workspace = true
+log = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+block2.workspace = true
+dispatch2 = { workspace = true, features = ["objc2"] }
+objc2.workspace = true
+objc2-authentication-services = { workspace = true, features = [
+    "block2",
+    "ASFoundation",
+    "ASWebAuthenticationSession",
+] }
+objc2-foundation = { workspace = true, features = [
+    "alloc",
+    "NSArray",
+    "NSEnumerator",
+    "NSError",
+    "NSObject",
+    "NSString",
+    "NSURL",
+] }
+objc2-ui-kit = { workspace = true, features = [
+    "alloc",
+    "UIApplication",
+    "UIResponder",
+    "UIView",
+    "UIWindow",
+] }
+
+[features]
+default = []
+log = ["dep:log"]
