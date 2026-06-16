@@ -1,0 +1,16 @@
+[package]
+name = "robius-common"
+version.workspace = true
+edition.workspace = true
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "Shared types and functions used by other robius crates"
+documentation = "https://docs.rs/robius-common"
+homepage.workspace = true
+keywords = ["robius", "types", "shared", "platform"]
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"

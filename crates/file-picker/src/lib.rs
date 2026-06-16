@@ -43,6 +43,7 @@ mod sys;
 use std::{path::{Path, PathBuf}, sync::Arc};
 
 pub use error::{Error, Result};
+use robius_common::FileLocation;
 pub(crate) type DialogCallback = Box<dyn FnOnce(Result<Option<PickedFile>>) + Send + 'static>;
 pub(crate) type DialogData = Box<dyn AsRef<[u8]> + Send + 'static>;
 
@@ -282,6 +283,14 @@ pub enum MediaKind {
     #[doc(alias("photos", "pictures", "movies"))]
     ImageOrVideo,
 }
+impl MediaKind {
+    pub fn is_image(&self) -> bool {
+        matches!(self, Self::Image | Self::ImageOrVideo)
+    }
+    pub fn is_video(&self) -> bool {
+        matches!(self, Self::Video | Self::ImageOrVideo)
+    }
+}
 
 /// A well-known directory that a file dialog should start in.
 ///
@@ -355,6 +364,7 @@ fn file_name_component(file_name: &str) -> Option<&str> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PickedFile {
     location: FileLocation,
+    owned_temp: bool,
     display_name: Option<String>,
     mime_type: Option<String>,
     size: Option<u64>,
@@ -364,10 +374,8 @@ impl PickedFile {
     #[allow(dead_code)]
     pub(crate) fn from_path(path: PathBuf) -> Self {
         Self {
-            location: FileLocation::Path {
-                path,
-                owned_temp: false,
-            },
+            location: FileLocation::from_path(path),
+            owned_temp: false,
             display_name: None,
             mime_type: None,
             size: None,
@@ -378,10 +386,8 @@ impl PickedFile {
     #[allow(dead_code)]
     pub(crate) fn from_owned_temp_path(path: PathBuf) -> Self {
         Self {
-            location: FileLocation::Path {
-                path,
-                owned_temp: true,
-            },
+            location: FileLocation::from_path(path),
+            owned_temp: true,
             display_name: None,
             mime_type: None,
             size: None,
@@ -391,7 +397,8 @@ impl PickedFile {
     #[allow(dead_code)]
     pub(crate) fn from_uri(uri: String) -> Self {
         Self {
-            location: FileLocation::Uri(uri),
+            location: FileLocation::from_uri(uri),
+            owned_temp: false,
             display_name: None,
             mime_type: None,
             size: None,
@@ -407,7 +414,8 @@ impl PickedFile {
         size: Option<u64>,
     ) -> Self {
         Self {
-            location: FileLocation::Uri(uri),
+            location: FileLocation::from_uri(uri),
+            owned_temp: false,
             display_name: display_name.filter(|s| !s.is_empty()),
             mime_type: mime_type.filter(|s| !s.is_empty()),
             size,
@@ -416,34 +424,22 @@ impl PickedFile {
 
     /// Returns this file as a filesystem path, if the platform returned one.
     pub fn path(&self) -> Option<&Path> {
-        match &self.location {
-            FileLocation::Path { path, .. } => Some(path),
-            FileLocation::Uri(_) => None,
-        }
+        self.location.path()
     }
 
     /// Returns this file as a platform URI, if the platform returned one.
     pub fn uri(&self) -> Option<&str> {
-        match &self.location {
-            FileLocation::Path { .. } => None,
-            FileLocation::Uri(uri) => Some(uri),
-        }
+        self.location.uri()
     }
 
     /// Consumes this file and returns its filesystem path, if any.
     pub fn into_path(self) -> Option<PathBuf> {
-        match self.location {
-            FileLocation::Path { path, .. } => Some(path),
-            FileLocation::Uri(_) => None,
-        }
+        self.location.into_path()
     }
 
     /// Consumes this file and returns its platform URI, if any.
     pub fn into_uri(self) -> Option<String> {
-        match self.location {
-            FileLocation::Path { .. } => None,
-            FileLocation::Uri(uri) => Some(uri),
-        }
+        self.location.into_uri()
     }
 
     /// The platform-provided display name, if known (Android).
@@ -468,7 +464,7 @@ impl PickedFile {
             return Some(name);
         }
         match &self.location {
-            FileLocation::Path { path, .. } => path.file_name().and_then(|name| name.to_str()),
+            FileLocation::Path(path) => path.file_name().and_then(|name| name.to_str()),
             FileLocation::Uri(uri) => uri
                 .split('?')
                 .next()
@@ -486,7 +482,7 @@ impl PickedFile {
     /// if you need to write it to storage instead.
     pub fn read_bytes(&self) -> Result<Vec<u8>> {
         match &self.location {
-            FileLocation::Path { path, .. } => Ok(std::fs::read(path)?),
+            FileLocation::Path(path) => Ok(std::fs::read(path)?),
             FileLocation::Uri(uri) => sys::read_uri_bytes(uri),
         }
     }
@@ -516,12 +512,13 @@ impl PickedFile {
 
         let PickedFile {
             location,
+            owned_temp,
             display_name,
             mime_type,
             size,
         } = self;
         match location {
-            FileLocation::Path { path, owned_temp } => Ok(LocalFile {
+            FileLocation::Path(path) => Ok(LocalFile {
                 cleanup: owned_temp.then(|| Arc::new(TempPathCleanup { path: path.clone() })),
                 path,
                 display_name,
@@ -616,16 +613,4 @@ impl Drop for TempPathCleanup {
             let _ = std::fs::remove_dir(parent);
         }
     }
-}
-
-/// The platform-specific location of a picked file.
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum FileLocation {
-    Path {
-        path: PathBuf,
-        /// If true, this referes to a temp file that we should clean up later.
-        owned_temp: bool,
-    },
-    Uri(String),
 }
