@@ -89,6 +89,13 @@ pub(crate) struct Policy {
     inner: LAPolicy,
 }
 
+impl Policy {
+    #[inline]
+    pub(crate) fn set_action_id(&mut self, _: String) -> Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct PolicyBuilder {
     _biometrics: bool,
@@ -133,6 +140,10 @@ impl PolicyBuilder {
             _wrist_detection: wrist_detection,
             ..self
         }
+    }
+
+    pub(crate) fn action_ids(self, _: Vec<String>) -> Self {
+        self
     }
 
     pub(crate) const fn build(self) -> Option<Policy> {
