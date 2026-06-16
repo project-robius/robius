@@ -984,6 +984,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "robius-common"
+version = "0.2.0"
+
+[[package]]
 name = "robius-directories"
 version = "6.0.0"
 dependencies = [
@@ -1010,6 +1014,7 @@ dependencies = [
  "objc2-uniform-type-identifiers",
  "rfd",
  "robius-android-env",
+ "robius-common",
  "robius-directories",
 ]
 

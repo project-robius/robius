@@ -1,6 +1,6 @@
 use std::{
     cell::Cell,
-    ffi::CStr,
+    ffi::{CStr, OsStr},
     fs,
     path::{Path, PathBuf},
     ptr,
@@ -171,6 +171,7 @@ struct PendingMediaPicker {
     on_completion: Option<DialogCallback>,
     _picker: Retained<PHPickerViewController>,
     _delegate: Retained<RobiusMediaPickerDelegate>,
+    media_kind: MediaKind,
 }
 
 pub(super) struct Ivars {
@@ -308,13 +309,17 @@ impl RobiusMediaPickerDelegate {
         dismiss_media_picker(picker);
         if pending.is_null() { return; }
 
+        // SAFE: we alloc'd `pending` as a Box and set the ptr value via `Box::into_raw`,
+        //       and then we just tool ownership of it with `replace` above.
+        let media_kind = unsafe { (*pending).media_kind };
+
         let Some(result) = results.iter().next() else {
             finish_media_picker(pending, Ok(None));
             return;
         };
 
         let provider = unsafe { result.itemProvider() };
-        let type_identifier = match first_type_identifier(&provider) {
+        let type_identifier = match media_type_identifier(&provider, media_kind) {
             Some(type_identifier) => type_identifier,
             None => {
                 finish_media_picker(pending, Err(Error::Unknown));
@@ -493,6 +498,7 @@ fn show_media_inner(
         on_completion: Some(on_completion),
         _picker: picker.clone(),
         _delegate: delegate.clone(),
+        media_kind,
     });
     delegate.set_pending(Box::into_raw(pending));
 
@@ -627,8 +633,34 @@ fn media_document_options(
     options
 }
 
-fn first_type_identifier(provider: &NSItemProvider) -> Option<Retained<NSString>> {
-    unsafe { provider.registeredTypeIdentifiers() }.iter().next()
+
+/// Chooses which content to load from a picked media item based on the given media kind.
+///
+/// Live photos are kinda annoying to deal with on iOS, which is why we no longer use
+/// [`first_type_identifier`] (the first entry of `registeredTypeIdentifiers`) here,
+/// because that returns some weird `.pvt` package for a live photo.
+fn media_type_identifier(
+    provider: &NSItemProvider,
+    media_kind: MediaKind,
+) -> Option<Retained<NSString>> {
+    let image_uti = unsafe { UTTypeImage };
+    let video_uti = unsafe { UTTypeMovie };
+
+    let conforms_to = |ut_type: &UTType| unsafe {
+        provider.hasItemConformingToTypeIdentifier(&ut_type.identifier())
+    };
+
+    // we prefer returning the still image from within a live photo,
+    // but only if the caller indicated that they want an image.
+    let ut_type = if media_kind.is_image() && conforms_to(image_uti) {
+        image_uti
+    } else if media_kind.is_video() && conforms_to(video_uti) {
+        video_uti
+    } else {
+        // Fall back to the first registered identifier if nothing conforms.
+        return unsafe { provider.registeredTypeIdentifiers() }.iter().next();
+    };
+    Some(unsafe { ut_type.identifier() })
 }
 
 fn dismiss_media_picker(picker: &PHPickerViewController) {
@@ -683,7 +715,7 @@ fn finish_media_picker(pending: *mut PendingMediaPicker, result: Result<Option<P
 fn copy_media_file(url: &NSURL, suggested_name: Option<&str>) -> Result<PickedFile> {
     if unsafe { url.isFileURL() } {
         if let Some(path) = unsafe { url.path() } {
-            let source_path = PathBuf::from(path.to_string());
+            let source_path = resolve_regular_file(PathBuf::from(path.to_string()))?;
             let file_name = source_path
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -767,6 +799,51 @@ fn create_temporary_copy(file_name: &str, source_path: &Path) -> Result<PathBuf>
     let path = directory.join(file_name);
     fs::copy(source_path, &path)?;
     Ok(path)
+}
+
+/// Resolves the given path to a regular file, handling quirks like a live photo.
+///
+/// If `path` points to a package bundle (like a live photo `.pvt`),
+/// this function iterates through the files in that package to pull out a path to
+/// (1) an image, or (2) a video, or (3) anything elae as a last resort.
+fn resolve_regular_file(path: PathBuf) -> Result<PathBuf> {
+    let metadata = fs::metadata(&path)?;
+    if metadata.is_file() {
+        return Ok(path);
+    }
+    if metadata.is_dir() {
+        let mut best: Option<(u8, PathBuf)> = None;
+        for entry in fs::read_dir(&path)?.flatten() {
+            let p = entry.path();
+            if !p.is_file() {
+                continue;
+            }
+            let priority = file_type_priority(&p);
+            if best.as_ref().is_none_or(|(best_prio, _)| priority > *best_prio) {
+                best = Some((priority, p));
+            }
+        }
+        if let Some((_, file)) = best {
+            return Ok(file);
+        }
+    }
+    Err(Error::Unknown)
+}
+
+fn file_type_priority(path: &Path) -> u8 {
+    let Some(ext) = path.extension().and_then(OsStr::to_str) else {
+        return 1;
+    };
+    let Some(ut_type) = (unsafe { UTType::typeWithFilenameExtension(&NSString::from_str(ext)) }) else {
+        return 1;
+    };
+    if unsafe { ut_type.conformsToType(UTTypeImage) } {
+        3
+    } else if unsafe { ut_type.conformsToType(UTTypeMovie) } {
+        2
+    } else {
+        1
+    }
 }
 
 fn create_temporary_file(file_name: &str, data: &[u8]) -> Result<PathBuf> {
