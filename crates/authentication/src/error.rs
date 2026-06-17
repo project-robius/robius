@@ -2,7 +2,7 @@
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// An error produced during authentication.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Error {
     // TODO: Reexport jni::errors::Error
     // TODO: Remove target cfg
@@ -19,6 +19,8 @@ pub enum Error {
     Unavailable,
     /// The user canceled authentication.
     UserCanceled,
+    /// The provided action ID is not in the policy's allowed list.
+    InvalidActionId,
 
     // Apple-specific errors
     /// The app canceled authentication.
