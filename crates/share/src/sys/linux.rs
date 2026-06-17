@@ -2,6 +2,7 @@ use std::{
     ffi::OsString,
     fs::{File, OpenOptions},
     io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
@@ -44,7 +45,7 @@ impl LinuxPayload {
 
 fn file_payload(file: &SharedFile) -> Result<LinuxPayload> {
     if let Some(path) = file.path() {
-        std::fs::metadata(path)?;
+        let path = std::fs::canonicalize(path)?;
         return Ok(LinuxPayload::Path(path.to_owned()));
     }
 
@@ -150,7 +151,7 @@ fn command_status_error(_status: ExitStatus) -> CommandError {
 }
 
 fn write_temp_text_file(text: &str) -> Result<PathBuf> {
-    let temp_dir = std::env::temp_dir();
+    let temp_dir = temp_share_dir()?;
     for _ in 0..100 {
         let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = temp_dir.join(format!(
@@ -158,7 +159,12 @@ fn write_temp_text_file(text: &str) -> Result<PathBuf> {
             std::process::id(),
         ));
 
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+        {
             Ok(mut file) => {
                 file.write_all(text.as_bytes())?;
                 return Ok(path);
@@ -172,6 +178,16 @@ fn write_temp_text_file(text: &str) -> Result<PathBuf> {
         std::io::ErrorKind::AlreadyExists,
         "could not create a temporary share payload",
     )))
+}
+
+fn temp_share_dir() -> Result<PathBuf> {
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("robius-share");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    Ok(dir)
 }
 
 fn manifest_text(options: &ShareOptions) -> String {

@@ -25,14 +25,15 @@ pub(crate) fn share(options: ShareOptions) -> Result<()> {
 
 fn validate_android_items(options: &ShareOptions) -> Result<()> {
     for file in file_items(options) {
-        if file.path().is_some() {
-            return Err(Error::UnsupportedItem);
-        }
-        let Some(uri) = file.uri() else {
-            return Err(Error::InvalidItem);
-        };
-        if !uri.starts_with("content://") {
-            return Err(Error::UnsupportedItem);
+        if let Some(path) = file.path() {
+            std::fs::metadata(path)?;
+        } else {
+            let Some(uri) = file.uri() else {
+                return Err(Error::InvalidItem);
+            };
+            if !uri.starts_with("content://") && !uri.starts_with("file://") {
+                return Err(Error::UnsupportedItem);
+            }
         }
     }
     Ok(())
@@ -60,16 +61,25 @@ fn share_inner(
         .transpose()?;
 
     let files = file_items(options).collect::<Vec<_>>();
-    let uri_strings = files
+    let file_locations = files
         .iter()
-        .filter_map(|file| file.uri().map(ToOwned::to_owned))
-        .collect::<Vec<_>>();
+        .map(|file| {
+            if let Some(uri) = file.uri() {
+                Ok(uri.to_owned())
+            } else {
+                file.path()
+                    .and_then(|path| path.to_str())
+                    .map(ToOwned::to_owned)
+                    .ok_or(Error::InvalidItem)
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
     let mime_types = files
         .iter()
         .map(|file| file.mime_type().map(ToOwned::to_owned))
         .collect::<Vec<_>>();
 
-    let uri_strings = string_array(env, &uri_strings)?;
+    let file_locations = string_array(env, &file_locations)?;
     let mime_types = optional_string_array(env, &mime_types)?;
 
     let null = JObject::null();
@@ -79,9 +89,9 @@ fn share_inner(
         .map(|subject| subject.as_ref())
         .unwrap_or(&null);
     let text = text.as_ref().map(|text| text.as_ref()).unwrap_or(&null);
-    let uri_strings = uri_strings
+    let file_locations = file_locations
         .as_ref()
-        .map(|uris| uris.as_ref())
+        .map(|locations| locations.as_ref())
         .unwrap_or(&null);
     let mime_types = mime_types
         .as_ref()
@@ -97,7 +107,7 @@ fn share_inner(
             JValueGen::Object(title),
             JValueGen::Object(subject),
             JValueGen::Object(text),
-            JValueGen::Object(uri_strings),
+            JValueGen::Object(file_locations),
             JValueGen::Object(mime_types),
         ],
     )?.i()?;

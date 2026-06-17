@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use windows::{
     ApplicationModel::DataTransfer::{
-        DataPackageOperation, DataRequestedEventArgs, DataTransferManager,
+        DataPackageOperation, DataRequest, DataRequestedEventArgs, DataTransferManager,
     },
     Foundation::{Collections::IIterable, TypedEventHandler, Uri},
     Storage::{IStorageItem, StorageFile},
@@ -13,7 +13,7 @@ use windows::{
             WindowsAndMessaging::GetForegroundWindow,
         },
     },
-    core::{factory, HSTRING, Interface},
+    core::{factory, HSTRING, HRESULT, Interface},
 };
 
 use crate::{file_items, shared_text, Error, Result, ShareItem, ShareOptions};
@@ -46,8 +46,18 @@ pub(crate) fn share(options: ShareOptions) -> Result<()> {
         move |_sender: &Option<DataTransferManager>,
               args: &Option<DataRequestedEventArgs>| {
             if let Some(args) = args {
-                if fill_request(&payload_for_handler, args).is_err() {
-                    if let Ok(request) = args.Request() {
+                if let Ok(request) = args.Request() {
+                    if let Ok(deferral) = request.GetDeferral() {
+                        let payload_for_thread = payload_for_handler.clone();
+                        std::thread::spawn(move || {
+                            if fill_request(&payload_for_thread, &request).is_err() {
+                                let _ = request.FailWithDisplayText(&HSTRING::from(
+                                    "Unable to prepare the share payload.",
+                                ));
+                            }
+                            let _ = deferral.Complete();
+                        });
+                    } else {
                         let _ = request.FailWithDisplayText(&HSTRING::from(
                             "Unable to prepare the share payload.",
                         ));
@@ -128,14 +138,13 @@ fn validate_windows_items(options: &ShareOptions) -> Result<()> {
         let Some(path) = file.path() else {
             return Err(Error::UnsupportedItem);
         };
-        std::fs::metadata(path)?;
+        std::fs::canonicalize(path)?;
     }
 
     Ok(())
 }
 
-fn fill_request(payload: &ShareOptions, args: &DataRequestedEventArgs) -> windows::core::Result<()> {
-    let request = args.Request()?;
+fn fill_request(payload: &ShareOptions, request: &DataRequest) -> windows::core::Result<()> {
     let data = request.Data()?;
     let properties = data.Properties()?;
 
@@ -180,10 +189,19 @@ fn storage_items(options: &ShareOptions) -> windows::core::Result<Vec<Option<ISt
         let Some(path) = file.path() else {
             continue;
         };
-        let storage_file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
+        let path = std::fs::canonicalize(path).map_err(io_to_windows_error)?;
+        let storage_file =
+            StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_path()))?.get()?;
         let storage_item: IStorageItem = storage_file.cast()?;
         storage_items.push(Some(storage_item));
     }
 
     Ok(storage_items)
+}
+
+fn io_to_windows_error(error: std::io::Error) -> windows::core::Error {
+    windows::core::Error::new(
+        HRESULT(0x80004005u32 as i32),
+        error.to_string(),
+    )
 }

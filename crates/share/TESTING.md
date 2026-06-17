@@ -31,7 +31,8 @@ The native share UI should be tested from a real app window/activity rather
 than a plain CLI. This repository includes a local Makepad example app for that:
 
 ```sh
-cargo run --manifest-path crates/examples/Cargo.toml --bin share_example_makepad
+cd crates/examples
+cargo run
 ```
 
 Use the buttons in the app to exercise:
@@ -81,9 +82,11 @@ Exercise the same logical payloads from the Makepad test app:
 - `mixed`: text + URL + one attachment
 - `picked file`: one attachment selected through `robius-file-picker`
 
-Android's file case must use `add_file_uri()` with a `content://` URI that the
-app can grant to the receiver. A raw filesystem path is expected to return
-`Error::UnsupportedItem` on Android.
+Android's picked-file case uses `add_file_uri()` with a `content://` URI that
+the app can grant to the receiver. Android generated-file cases use `add_file()`;
+on Android 10 and newer, those files are copied to a shareable MediaStore item
+before launching the chooser. On Android 8 and 9, the generated-file example is
+a small text file and is shared as text content.
 
 iOS can use `add_file()` with a temporary or bundled local file.
 

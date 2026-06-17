@@ -73,7 +73,7 @@ fn file_object(file: &SharedFile) -> Result<Retained<AnyObject>> {
 }
 
 fn file_url_object(path: &Path) -> Result<Retained<AnyObject>> {
-    std::fs::metadata(path)?;
+    let path = std::fs::canonicalize(path)?;
     let path = path.to_str().ok_or(Error::InvalidItem)?;
     let url = unsafe { NSURL::fileURLWithPath(&NSString::from_str(path)) };
     Ok(url.into_super().into_super())

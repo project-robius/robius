@@ -5,11 +5,12 @@
 //! share APIs don't expose exactly the same payload model on every OS:
 //! * **Android**: sharing uses `Intent.ACTION_SEND` or `ACTION_SEND_MULTIPLE`,
 //!   wrapped in the Android Sharesheet via `Intent.createChooser`.
-//!   * Text, URLs, and `content://` attachments are supported.
-//!   * Filesystem path attachments must first be represented as `content://`
-//!     URIs. Android requires a manifest-registered `ContentProvider` to safely
-//!     expose private files as temporary content URIs, so Rust-only code cannot
-//!     convert arbitrary private paths into shareable attachments by itself.
+//!   * Text, URLs, `content://` attachments, and filesystem path attachments
+//!     are supported.
+//!   * Filesystem path attachments are copied to a shareable MediaStore item on
+//!     Android 10 and newer. On older Android versions, text files can be shared
+//!     as text content, but arbitrary binary path attachments require an app
+//!     `ContentProvider`.
 //! * **iOS**: sharing uses `UIActivityViewController`, with text, URLs, and
 //!   filesystem path attachments.
 //! * **macOS**: sharing uses `NSSharingServicePicker`, with text, URLs, and
@@ -47,9 +48,10 @@
 mod error;
 mod sys;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub use error::{Error, Result};
+use robius_common::FileLocation;
 
 /// A native share sheet builder.
 #[derive(Clone, Debug, Default)]
@@ -102,11 +104,10 @@ impl ShareSheet {
 
     /// Adds a filesystem path attachment.
     ///
-    /// This works on iOS, macOS, Windows, and Linux. On Android, this returns
-    /// [`Error::UnsupportedItem`] because Android receivers need a temporary
-    /// `content://` URI, not a private filesystem path. Use
-    /// [`add_file_uri`](Self::add_file_uri) on Android if your app already has
-    /// a shareable content URI for the file.
+    /// On Android 10 and newer, this copies the file to a shareable MediaStore
+    /// item before launching the chooser. On older Android versions, text files
+    /// can be shared as text content, while arbitrary binary path attachments
+    /// require a host app `ContentProvider`.
     #[must_use]
     pub fn add_file<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.options.items.push(ShareItem::File(SharedFile::from_path(path)));
@@ -129,8 +130,9 @@ impl ShareSheet {
     /// Adds a platform file/content URI attachment.
     ///
     /// This is primarily for Android `content://` URIs that your app already
-    /// owns or received from another platform API. Local `file://` URIs are not
-    /// accepted on Android.
+    /// owns or received from another platform API. Local `file://` URIs are
+    /// accepted on Android and are copied to a shareable MediaStore item where
+    /// supported.
     #[must_use]
     pub fn add_file_uri(mut self, uri: impl Into<String>) -> Self {
         self.options.items.push(ShareItem::File(SharedFile::from_uri(uri)));
@@ -163,7 +165,7 @@ impl ShareSheet {
 /// A file attachment in a share payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SharedFile {
-    location: SharedFileLocation,
+    location: FileLocation,
     mime_type: Option<String>,
 }
 
@@ -171,7 +173,7 @@ impl SharedFile {
     /// Creates a file attachment from a filesystem path.
     pub fn from_path<P: AsRef<Path>>(path: P) -> Self {
         Self {
-            location: SharedFileLocation::Path(path.as_ref().to_owned()),
+            location: FileLocation::from_path(path),
             mime_type: None,
         }
     }
@@ -179,7 +181,7 @@ impl SharedFile {
     /// Creates a file attachment from a platform file/content URI.
     pub fn from_uri(uri: impl Into<String>) -> Self {
         Self {
-            location: SharedFileLocation::Uri(uri.into()),
+            location: FileLocation::from_uri(uri),
             mime_type: None,
         }
     }
@@ -193,18 +195,12 @@ impl SharedFile {
 
     /// Returns this attachment as a filesystem path, if it has one.
     pub fn path(&self) -> Option<&Path> {
-        match &self.location {
-            SharedFileLocation::Path(path) => Some(path),
-            SharedFileLocation::Uri(_) => None,
-        }
+        self.location.path()
     }
 
     /// Returns this attachment as a platform URI, if it has one.
     pub fn uri(&self) -> Option<&str> {
-        match &self.location {
-            SharedFileLocation::Path(_) => None,
-            SharedFileLocation::Uri(uri) => Some(uri),
-        }
+        self.location.uri()
     }
 
     /// Returns the explicit MIME type hint, if one was set.
@@ -222,12 +218,6 @@ pub enum ShareItem {
     Url(String),
     /// A file attachment.
     File(SharedFile),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum SharedFileLocation {
-    Path(PathBuf),
-    Uri(String),
 }
 
 /// Options collected by [`ShareSheet`].
@@ -249,10 +239,10 @@ impl ShareOptions {
                 ShareItem::Text(text) if text.is_empty() => return Err(Error::InvalidItem),
                 ShareItem::Url(url) if url.is_empty() => return Err(Error::InvalidItem),
                 ShareItem::File(file) => match &file.location {
-                    SharedFileLocation::Path(path) if path.as_os_str().is_empty() => {
+                    FileLocation::Path(path) if path.as_os_str().is_empty() => {
                         return Err(Error::InvalidItem);
                     }
-                    SharedFileLocation::Uri(uri) if uri.is_empty() => {
+                    FileLocation::Uri(uri) if uri.is_empty() => {
                         return Err(Error::InvalidItem);
                     }
                     _ if file.mime_type.as_deref() == Some("") => return Err(Error::InvalidItem),
