@@ -14,7 +14,6 @@ Run these from the workspace root:
 
 ```sh
 cargo test -p robius-share
-cargo check -p robius-share --examples
 cargo check -p robius-share --target x86_64-unknown-linux-gnu
 cargo check -p robius-share --target x86_64-pc-windows-msvc
 cargo check -p robius-share --target aarch64-linux-android
@@ -22,8 +21,8 @@ cargo check -p robius-share --target aarch64-apple-ios
 git diff --check
 ```
 
-This catches the portable builder contract, example compilation, and the native
-FFI surfaces for every supported target.
+This catches the portable builder contract and the native FFI surfaces for
+every supported target.
 
 ## Makepad Test App
 
@@ -31,7 +30,7 @@ The native share UI should be tested from a real app window/activity rather
 than a plain CLI. This repository includes a local Makepad example app for that:
 
 ```sh
-cd crates/examples
+cd examples/example-share-sheet
 cargo run
 ```
 
@@ -47,30 +46,27 @@ The picked-file path is the important Android attachment case: Android file
 picker results are `content://` URIs, and the example app passes that URI directly
 to `robius-share`.
 
-## CLI Desktop Test Cases
+## Desktop Test Cases
 
-On macOS, Windows, and Linux, run:
-
-```sh
-cargo run -p robius-share --example share_example -- text
-cargo run -p robius-share --example share_example -- url
-cargo run -p robius-share --example share_example -- file
-cargo run -p robius-share --example share_example -- mixed
-```
-
-Pass a file path after `file` or `mixed` to test a specific attachment:
+On macOS, Windows, and Linux, run the same Makepad test app and use its buttons
+to exercise each payload:
 
 ```sh
-cargo run -p robius-share --example share_example -- file /path/to/file.pdf
+cd examples/example-share-sheet
+cargo run
 ```
+
+Use "Share Text", "Share URL", "Share Generated File", and "Share Mixed Payload"
+to cover the basic payloads, and "Pick File and Share" to test a specific
+attachment.
 
 Expected result: the system-native share or app chooser appears, at least one
 receiving app is offered, and the selected app receives the expected text, URL,
 file, or manifest-style mixed payload.
 
-The CLI example is useful for desktop payload checks, but it is not a
-substitute for the Makepad test app. Some platforms require an active app
-window, activity, or view controller to present a share sheet.
+There is intentionally no separate CLI example: some platforms require an active
+app window, activity, or view controller to present a share sheet, so every
+payload check goes through the Makepad app rather than a plain `cargo run` CLI.
 
 ## Mobile Test Cases
 

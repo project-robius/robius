@@ -6,7 +6,7 @@ members = [
 ]
 
 exclude = [
-    "crates/examples",
+    "examples/example-share-sheet",
 ]
 
 # Note: we haven't yet implemented the top-level crate of re-exports.

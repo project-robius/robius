@@ -1,5 +1,5 @@
 [package]
-name = "robius-examples"
+name = "example-share-sheet"
 version = "0.1.0"
 edition = "2021"
 authors = [
@@ -11,6 +11,6 @@ publish = false
 
 [dependencies]
 makepad-widgets = { path = "../../../makepad/widgets" }
-robius-file-picker = { path = "../file-picker" }
-robius-share = { path = "../share" }
+robius-file-picker = { path = "../../crates/file-picker" }
+robius-share = { path = "../../crates/share" }
 robius-use-makepad = { path = "../../../robius-use-makepad" }
