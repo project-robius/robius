@@ -26,7 +26,7 @@ android-build.workspace = true
 
 [dependencies]
 cfg-if.workspace = true
-robius-common = { version = "0.2.0", path = "../common" }
+robius-common.workspace = true
 
 
 [target.'cfg(target_os = "android")'.dependencies]

@@ -47,10 +47,13 @@ repository = "https://github.com/project-robius/robius"
 
 [workspace.dependencies]
 ## General dependencies (target-independent) used in multiple crates in the workspace.
+robius-common = { version = "0.2.0", path = "crates/common" }
 cfg-if = "1.0.0"
 log = "0.4"
 retry = "2.0.0"
 tokio = { version = "1.43.1", default-features = false }
+
+
 
 
 ## Android-specific dependencies used in multiple crates in the workspace.

@@ -10,7 +10,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-makepad-widgets = { path = "../../../makepad/widgets" }
+makepad-widgets = { git = "https://github.com/makepad/makepad" }
 robius-file-picker = { path = "../../crates/file-picker" }
 robius-share = { path = "../../crates/share" }
-robius-use-makepad = { path = "../../../robius-use-makepad" }
+robius-use-makepad = { git = "https://github.com/project-robius/robius-use-makepad"}
