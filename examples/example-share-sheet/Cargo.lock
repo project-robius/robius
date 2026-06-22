@@ -1199,6 +1199,7 @@ dependencies = [
  "cfg-if",
  "dispatch2",
  "jni",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

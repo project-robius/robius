@@ -18,18 +18,18 @@
 //! * **Windows**: sharing uses the native WinRT Share UI through
 //!   `DataTransferManager` desktop-window interop, with text, URLs, and
 //!   filesystem path attachments.
-//! * **Linux**: Linux does not have a single standardized share sheet. This
-//!   crate uses the XDG desktop portal app chooser when available, calling
-//!   `OpenURI` for URI payloads and `OpenFile` for local files, then falling
-//!   back to `xdg-open`. When a payload cannot be represented as one URI or
-//!   file, it writes a temporary text payload and opens that with the platform
-//!   app chooser/default handler.
+//! * **Linux**: Linux doesn't have a single standardized share sheet, so this
+//!   crate talks to the XDG desktop portal over a minimal D-Bus interface.
+//!   * A single file or URL is shared via the "Open With" app chooser.
+//!   * A mixed payload (multiple items) will open a save files dialog,
+//!     and write each item to the directory chosen by the user.
+//!   * If the d-bus portal doesn't work or isn't available, it alls back to `xdg-open`.
 //!
 //! ## Completion
-//! `share()` reports whether the native share sheet was successfully presented.
-//! It does not report whether the user actually chose a target or completed the
-//! transfer. The underlying OSes expose different completion semantics, and
-//! Android share intents are typically fire-and-forget.
+//! * On macOS, iOS, and Windows, a successful `share()` means the native share sheet
+//!   was presented.
+//! * On Android and Linux, the share request is fire-and-forget, so a successful
+//!   return value means that the request was dispatched, not that anything was shown.
 //!
 //! ## Examples
 //!
@@ -236,16 +236,18 @@ impl ShareOptions {
 
         for item in &self.items {
             match item {
-                ShareItem::Text(text) if text.is_empty() => return Err(Error::InvalidItem),
-                ShareItem::Url(url) if url.is_empty() => return Err(Error::InvalidItem),
+                ShareItem::Text(text) if text.trim().is_empty() => return Err(Error::InvalidItem),
+                ShareItem::Url(url) if url.trim().is_empty() => return Err(Error::InvalidItem),
                 ShareItem::File(file) => match &file.location {
                     FileLocation::Path(path) if path.as_os_str().is_empty() => {
                         return Err(Error::InvalidItem);
                     }
-                    FileLocation::Uri(uri) if uri.is_empty() => {
+                    FileLocation::Uri(uri) if uri.trim().is_empty() => {
                         return Err(Error::InvalidItem);
                     }
-                    _ if file.mime_type.as_deref() == Some("") => return Err(Error::InvalidItem),
+                    _ if file.mime_type.as_deref().is_some_and(|m| m.trim().is_empty()) => {
+                        return Err(Error::InvalidItem);
+                    }
                     _ => {}
                 },
                 _ => {}

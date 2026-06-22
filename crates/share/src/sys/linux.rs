@@ -1,16 +1,16 @@
 use std::{
     ffi::OsString,
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    path::{Path, PathBuf},
-    process::{Command, ExitStatus, Stdio},
+    path::PathBuf,
+    process::{Command, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::{shared_text, Error, Result, ShareItem, ShareOptions, SharedFile};
+use crate::{Error, Result, ShareItem, ShareOptions, SharedFile};
 
-static TEMP_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+mod dbus;
 
 pub(crate) fn share(options: ShareOptions) -> Result<()> {
     let payload = LinuxPayload::new(&options)?;
@@ -20,6 +20,27 @@ pub(crate) fn share(options: ShareOptions) -> Result<()> {
 enum LinuxPayload {
     Uri(String),
     Path(PathBuf),
+    // A mixed payload has no single thing to "open", so we just save it to disk.
+    Save { title: String, items: Vec<SaveItem> },
+}
+
+struct SaveItem {
+    name: String,
+    source: SaveSource,
+}
+
+enum SaveSource {
+    File(PathBuf),
+    Text(String),
+}
+
+impl SaveItem {
+    fn write_to(&self, dest: &std::path::Path) -> std::io::Result<()> {
+        match &self.source {
+            SaveSource::File(src) => std::fs::copy(src, dest).map(|_| ()),
+            SaveSource::Text(text) => std::fs::write(dest, text),
+        }
+    }
 }
 
 impl LinuxPayload {
@@ -32,13 +53,218 @@ impl LinuxPayload {
             };
         }
 
-        Ok(Self::Path(write_temp_text_file(&manifest_text(options))?))
+        // No single thing to "open", so turn each item into its own file and let
+        // the user save them all to a folder of their choice.
+        let mut items = Vec::new();
+        for item in &options.items {
+            match item {
+                ShareItem::Text(text) => items.push(SaveItem {
+                    name: "text.txt".to_owned(),
+                    source: SaveSource::Text(text.clone()),
+                }),
+                ShareItem::Url(url) => items.push(url_link(url)),
+                ShareItem::File(file) => {
+                    if let Some((name, path)) = save_source(file) {
+                        items.push(SaveItem { name, source: SaveSource::File(path) });
+                    }
+                }
+            }
+        }
+        // If all items couldn't be made into files, just return an error.
+        if items.is_empty() {
+            return Err(Error::InvalidItem);
+        }
+        dedup_names(&mut items);
+        Ok(Self::Save { title: dialog_title(options), items })
     }
 
     fn open(self) -> Result<()> {
-        match self {
-            LinuxPayload::Uri(uri) => open_uri(&uri),
-            LinuxPayload::Path(path) => open_path(&path),
+        // Don't block the UI thread while the portal or file dialog is open.
+        std::thread::spawn(move || {
+            // Attempt to bring the portal or dialog to the front of teh screen.
+            let parent = parent_window();
+            match self {
+                LinuxPayload::Path(path) => {
+                    if dbus::open_path(&parent, &path, true).is_err() {
+                        let _ = open_with_xdg(path.into_os_string());
+                    }
+                }
+                LinuxPayload::Uri(uri) => {
+                    if dbus::open_uri(&parent, &uri, true).is_err() {
+                        let _ = open_with_xdg(OsString::from(uri));
+                    }
+                }
+                LinuxPayload::Save { title, items } => save_bundle(&parent, &title, items),
+            }
+        });
+        Ok(())
+    }
+}
+
+/// Ask the portal to save the bundle to a folder, then write each item there.
+fn save_bundle(parent: &str, title: &str, items: Vec<SaveItem>) {
+    let names = items
+        .iter()
+        .map(|item| {
+            let mut name = item.name.clone().into_bytes();
+            name.push(0); // yea, we still use NUL-terminated strings in old school linux stuff
+            name
+        })
+        .collect::<Vec<_>>();
+
+    match dbus::save_files(parent, title, &names) {
+        Ok(dests) => {
+            if dests.len() == items.len() {
+                for (dest, item) in dests.iter().zip(&items) {
+                    let _ = item.write_to(dest);
+                }
+            }
+        }
+        // Err means no d-bus portal, so just open the first item with `xdg-open`` instead.
+        Err(_) => {
+            let arg = items
+                .iter()
+                .find_map(|item| match &item.source {
+                    SaveSource::Text(text) => {
+                        write_temp_text_file(text).ok().map(PathBuf::into_os_string)
+                    }
+                    SaveSource::File(_) => None,
+                })
+                .or_else(|| {
+                    items.iter().find_map(|item| match &item.source {
+                        SaveSource::File(path) => Some(path.clone().into_os_string()),
+                        SaveSource::Text(_) => None,
+                    })
+                });
+            if let Some(arg) = arg {
+                let _ = open_with_xdg(arg);
+            }
+        }
+    }
+}
+
+/// Turn a URL into an `.html` file, which is the only file that all Linux distros
+/// seem to reliably open in a browser.
+fn url_link(url: &str) -> SaveItem {
+    // Only auto-redirecting URLs get treated by DEs as a clickable `.html`
+    let scheme = url.split_once(':').map(|(s, _)| s.to_ascii_lowercase());
+    if !matches!(scheme.as_deref(), Some("http" | "https" | "ftp" | "ftps")) {
+        return SaveItem {
+            name: "link.txt".to_owned(),
+            source: SaveSource::Text(format!("{url}\n")),
+        };
+    }
+    let name = url_host(url)
+        .map(|host| format!("{host}.html"))
+        .unwrap_or_else(|| "link.html".to_owned());
+    let url = html_escape(url);
+    // just a really simple auto-redirect html file template
+    let contents = format!(
+        "<!doctype html><meta charset=utf-8>\n\
+         <meta http-equiv=refresh content=\"0; url={url}\">\n\
+         <title>{url}</title>\n\
+         <a href=\"{url}\">{url}</a>\n"
+    );
+    SaveItem { name, source: SaveSource::Text(contents) }
+}
+
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Extract a filesystem-safe host name from a URL, if it has one.
+fn url_host(url: &str) -> Option<String> {
+    let host = url.split_once("://")?.1.split(['/', '?', '#']).next()?;
+    if host.is_empty() {
+        return None;
+    }
+    let safe = host
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .collect();
+    Some(safe)
+}
+
+/// Returns the save dialog title: the share title, or the subject, otherwise a default.
+fn dialog_title(options: &ShareOptions) -> String {
+    options.title.clone()
+        .or_else(|| options.subject.clone())
+        .unwrap_or_else(|| "Save shared files".to_owned())
+}
+
+/// Attempts to find the parent window of the current app using xprop.
+fn parent_window() -> String {
+    // `xprop` needs a reachable X server (real X11, or XWayland under Wayland).
+    if std::env::var_os("DISPLAY").is_none() {
+        return String::new();
+    }
+    active_x11_window()
+        .map(|xid| format!("x11:{xid:x}"))
+        .unwrap_or_default()
+}
+
+/// REturns the current X11 window ID (`_NET_ACTIVE_WINDOW`) via xprop.
+fn active_x11_window() -> Option<u64> {
+    let output = Command::new("xprop")
+        .args(["-root", "-notype", "_NET_ACTIVE_WINDOW"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    // "_NET_ACTIVE_WINDOW" is a property formatted as a hex number, like "... 0x2600011"
+    let text = String::from_utf8_lossy(&output.stdout);
+    let hex = text.rsplit("0x").next()?.trim();
+    u64::from_str_radix(hex, 16).ok().filter(|&id| id != 0)
+}
+
+/// Resolve a shared file to a tuple of `(suggested name, readable path)`.
+fn save_source(file: &SharedFile) -> Option<(String, PathBuf)> {
+    let path = if let Some(path) = file.path() {
+        std::fs::canonicalize(path).ok()?
+    } else if let Some(uri) = file.uri() {
+        let path = file_uri_to_path(uri)?;
+        std::fs::metadata(&path).ok()?;
+        path
+    } else {
+        return None;
+    };
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    Some((name, path))
+}
+
+/// Make the suggested file names unique so none overwrite each other.
+fn dedup_names(items: &mut [SaveItem]) {
+    let mut seen = std::collections::HashSet::new();
+    for item in items.iter_mut() {
+        if seen.insert(item.name.clone()) {
+            continue;
+        }
+        let (stem, ext) = match item.name.rsplit_once('.') {
+            Some((stem, ext)) => (stem.to_owned(), format!(".{ext}")),
+            None => (item.name.clone(), String::new()),
+        };
+        let mut n = 1;
+        loop {
+            let candidate = format!("{stem}-{n}{ext}");
+            if seen.insert(candidate.clone()) {
+                item.name = candidate;
+                break;
+            }
+            n += 1;
         }
     }
 }
@@ -46,7 +272,7 @@ impl LinuxPayload {
 fn file_payload(file: &SharedFile) -> Result<LinuxPayload> {
     if let Some(path) = file.path() {
         let path = std::fs::canonicalize(path)?;
-        return Ok(LinuxPayload::Path(path.to_owned()));
+        return Ok(LinuxPayload::Path(path));
     }
 
     let uri = file.uri().ok_or(Error::InvalidItem)?;
@@ -58,105 +284,37 @@ fn file_payload(file: &SharedFile) -> Result<LinuxPayload> {
     Ok(LinuxPayload::Uri(uri.to_owned()))
 }
 
-fn open_uri(uri: &str) -> Result<()> {
-    try_portal_open_uri(uri)
-        .or_else(|_| run_command("xdg-open", [OsString::from(uri)]))
-        .map_err(|err| match err {
-            CommandError::NoHandler => Error::NoHandler,
-            CommandError::Io(err) => Error::Io(err),
-        })
-}
-
-fn open_path(path: &Path) -> Result<()> {
-    try_portal_open_file(path)
-        .or_else(|_| run_command("xdg-open", [path.as_os_str().to_owned()]))
-        .map_err(|err| match err {
-            CommandError::NoHandler => Error::NoHandler,
-            CommandError::Io(err) => Error::Io(err),
-        })
-}
-
-fn try_portal_open_uri(uri: &str) -> std::result::Result<(), CommandError> {
-    run_command(
-        "gdbus",
-        [
-            OsString::from("call"),
-            OsString::from("--session"),
-            OsString::from("--dest"),
-            OsString::from("org.freedesktop.portal.Desktop"),
-            OsString::from("--object-path"),
-            OsString::from("/org/freedesktop/portal/desktop"),
-            OsString::from("--method"),
-            OsString::from("org.freedesktop.portal.OpenURI.OpenURI"),
-            OsString::from(gvariant_string("")),
-            OsString::from(gvariant_string(uri)),
-            OsString::from("{'ask': <true>}"),
-        ],
-    )
-}
-
-fn try_portal_open_file(path: &Path) -> std::result::Result<(), CommandError> {
-    let file = File::open(path).map_err(CommandError::Io)?;
-    run_command_with_stdin(
-        "gdbus",
-        [
-            OsString::from("call"),
-            OsString::from("--session"),
-            OsString::from("--dest"),
-            OsString::from("org.freedesktop.portal.Desktop"),
-            OsString::from("--object-path"),
-            OsString::from("/org/freedesktop/portal/desktop"),
-            OsString::from("--method"),
-            OsString::from("org.freedesktop.portal.OpenURI.OpenFile"),
-            OsString::from(gvariant_string("")),
-            OsString::from("0"),
-            OsString::from("{'ask': <true>}"),
-        ],
-        file,
-    )
-}
-
-fn run_command(
-    program: &str,
-    args: impl IntoIterator<Item = OsString>,
-) -> std::result::Result<(), CommandError> {
-    let status = Command::new(program).args(args).status();
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(command_status_error(status)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(CommandError::NoHandler),
-        Err(err) => Err(CommandError::Io(err)),
+fn open_with_xdg(arg: OsString) -> Result<()> {
+    let child = Command::new("xdg-open")
+        .arg(arg)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    match child {
+        Ok(mut child) => {
+            // Spawn a thread so we don't block the caller while waiting
+            // on the xdg-open child process.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(Error::NoHandler),
+        Err(err) => Err(Error::Io(err)),
     }
-}
-
-fn run_command_with_stdin(
-    program: &str,
-    args: impl IntoIterator<Item = OsString>,
-    stdin: File,
-) -> std::result::Result<(), CommandError> {
-    let status = Command::new(program)
-        .args(args)
-        .stdin(Stdio::from(stdin))
-        .status();
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(command_status_error(status)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(CommandError::NoHandler),
-        Err(err) => Err(CommandError::Io(err)),
-    }
-}
-
-fn command_status_error(_status: ExitStatus) -> CommandError {
-    CommandError::NoHandler
 }
 
 fn write_temp_text_file(text: &str) -> Result<PathBuf> {
+    static TEMP_FILE_SUFFIX: AtomicUsize = AtomicUsize::new(0);
+
     let temp_dir = temp_share_dir()?;
     for _ in 0..100 {
-        let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let counter = TEMP_FILE_SUFFIX.fetch_add(1, Ordering::Relaxed);
         let path = temp_dir.join(format!(
-            "robius-share-{}-{counter}.txt",
+            "robius-share-{}-{}.txt",
             std::process::id(),
+            counter,
         ));
 
         match OpenOptions::new()
@@ -188,43 +346,6 @@ fn temp_share_dir() -> Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
     Ok(dir)
-}
-
-fn manifest_text(options: &ShareOptions) -> String {
-    let mut text = String::new();
-
-    if let Some(title) = &options.title {
-        text.push_str(title);
-        text.push('\n');
-        text.push('\n');
-    }
-    if let Some(subject) = &options.subject {
-        text.push_str(subject);
-        text.push('\n');
-        text.push('\n');
-    }
-    if let Some(shared_text) = shared_text(options) {
-        text.push_str(&shared_text);
-        text.push('\n');
-        text.push('\n');
-    }
-
-    for item in &options.items {
-        match item {
-            ShareItem::Text(_) | ShareItem::Url(_) => {}
-            ShareItem::File(file) => {
-                if let Some(path) = file.path() {
-                    text.push_str(&path.display().to_string());
-                    text.push('\n');
-                } else if let Some(uri) = file.uri() {
-                    text.push_str(uri);
-                    text.push('\n');
-                }
-            }
-        }
-    }
-
-    text.trim_end().to_owned()
 }
 
 fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
@@ -267,21 +388,4 @@ fn hex_value(value: u8) -> Option<u8> {
         b'A'..=b'F' => Some(value - b'A' + 10),
         _ => None,
     }
-}
-
-fn gvariant_string(value: &str) -> String {
-    let mut escaped = String::from("'");
-    for ch in value.chars() {
-        if ch == '\'' || ch == '\\' {
-            escaped.push('\\');
-        }
-        escaped.push(ch);
-    }
-    escaped.push('\'');
-    escaped
-}
-
-enum CommandError {
-    NoHandler,
-    Io(std::io::Error),
 }
