@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, process::Command};
+use std::{marker::PhantomData, process::{Command, Stdio}};
 
 use crate::{Error, Result};
 
@@ -25,24 +25,38 @@ impl<'a, 'b> Uri<'a, 'b> {
 
     pub fn open<F>(self, on_completion: F) -> Result<()>
     where
-        F: Fn(bool) + 'static,
+        F: Fn(bool) + Send + 'static,
     {
-        match Command::new("xdg-open").arg(self.inner).status() {
-            Ok(status) => {
-                let success = status.success();
-                on_completion(success);
-                if success {
-                    return Ok(());
-                } else {
+        let child = Command::new("xdg-open")
+            .arg(self.inner)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        match child {
+            Ok(mut child) => {
+                // Spawn a thread so we don't block the caller waiting on
+                // the result of the xdg-open child process.
+                std::thread::spawn(move || {
+                    let success = matches!(child.wait(), Ok(status) if status.success());
                     #[cfg(feature = "log")]
-                    log::error!("Failed to open URI, `xdg-open` command returned {status}");
-                }
+                    if !success {
+                        log::error!("`xdg-open` did not open the URI successfully");
+                    }
+                    on_completion(success);
+                });
+                Ok(())
             }
-            Err(_e) => {
+            Err(e) => {
                 #[cfg(feature = "log")]
-                log::error!("Failed to open URI via `xdg-open`; error: {_e}");
+                log::error!("Failed to launch `xdg-open`; error: {e}");
+                Err(if e.kind() == std::io::ErrorKind::NotFound {
+                    Error::NoHandler
+                } else {
+                    Error::Unknown
+                })
             }
         }
-        Err(Error::Unknown)
     }
 }
