@@ -1,0 +1,16 @@
+[package]
+name = "example-share-sheet"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+license = "MIT"
+publish = false
+
+[dependencies]
+makepad-widgets = { git = "https://github.com/makepad/makepad" }
+robius-file-picker = { path = "../../crates/file-picker" }
+robius-share = { path = "../../crates/share" }
+robius-use-makepad = { git = "https://github.com/project-robius/robius-use-makepad"}
