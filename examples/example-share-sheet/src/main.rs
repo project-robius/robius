@@ -260,9 +260,7 @@ fn example_file_path() -> PathBuf {
 
 fn ensure_example_file() -> std::io::Result<PathBuf> {
     let path = example_file_path();
-    if !path.exists() {
-        write_example_file(&path)?;
-    }
+    write_example_file(&path)?;
     Ok(path)
 }
 
