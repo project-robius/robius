@@ -19,9 +19,9 @@ checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
 
 [[package]]
 name = "android-build"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9994787facbc3375d2b510024117d11fa98087be537ac878033892193bbb33d2"
+checksum = "f9fc9904ad2ad097c3c1cfe2eacaaf0fc24710936fa9ed941cb310b7c6ed2ab7"
 dependencies = [
  "windows-sys 0.52.0",
 ]
@@ -352,7 +352,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "robius-authentication"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "android-build",
  "block2",
@@ -1000,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "robius-common"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "robius-directories"
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "robius-file-picker"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "android-build",
  "block2",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "robius-location"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "android-build",
  "cfg-if",
@@ -1067,7 +1067,7 @@ dependencies = [
 
 [[package]]
 name = "robius-share"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "android-build",
  "cfg-if",
@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "robius-web-auth-session"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "cfg-if",
@@ -1113,7 +1113,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1243,7 +1243,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
