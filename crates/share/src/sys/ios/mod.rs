@@ -31,9 +31,7 @@ fn share_inner(mtm: MainThreadMarker, options: ShareOptions) -> Result<()> {
 
     let controller: Retained<UIViewController> = controller.into_super();
     configure_popover(&controller, &presenter);
-    unsafe {
-        presenter.presentViewController_animated_completion(&controller, true, None);
-    }
+    presenter.presentViewController_animated_completion(&controller, true, None);
 
     Ok(())
 }
@@ -61,7 +59,7 @@ fn share_item_object(item: &ShareItem) -> Result<Retained<AnyObject>> {
 }
 
 fn url_object(url: &str) -> Result<Retained<AnyObject>> {
-    let url = unsafe { NSURL::URLWithString(&NSString::from_str(url)) }
+    let url = NSURL::URLWithString(&NSString::from_str(url))
         .ok_or(Error::InvalidItem)?;
     Ok(url.into_super().into_super())
 }
@@ -77,7 +75,7 @@ fn file_object(file: &SharedFile) -> Result<Retained<AnyObject>> {
 fn file_url_object(path: &Path) -> Result<Retained<AnyObject>> {
     let path = std::fs::canonicalize(path)?;
     let path = path.to_str().ok_or(Error::InvalidItem)?;
-    let url = unsafe { NSURL::fileURLWithPath(&NSString::from_str(path)) };
+    let url = NSURL::fileURLWithPath(&NSString::from_str(path));
     Ok(url.into_super().into_super())
 }
 
@@ -86,17 +84,15 @@ fn string_object(text: &str) -> Retained<AnyObject> {
 }
 
 fn configure_popover(controller: &UIViewController, presenter: &UIViewController) {
-    let Some(popover) = (unsafe { controller.popoverPresentationController() }) else {
+    let Some(popover) = controller.popoverPresentationController() else {
         return;
     };
     let Some(view) = presenter.view() else {
         return;
     };
 
-    unsafe {
-        popover.setSourceView(Some(&view));
-        popover.setSourceRect(view.bounds());
-    }
+    popover.setSourceView(Some(&view));
+    popover.setSourceRect(view.bounds());
 }
 
 fn presenting_view_controller(mtm: MainThreadMarker) -> Result<Retained<UIViewController>> {
@@ -108,7 +104,7 @@ fn presenting_view_controller(mtm: MainThreadMarker) -> Result<Retained<UIViewCo
 
 fn active_window(application: &UIApplication) -> Option<Retained<UIWindow>> {
     #[allow(deprecated)]
-    if let Some(window) = unsafe { application.keyWindow() } {
+    if let Some(window) = application.keyWindow() {
         return Some(window);
     }
 
@@ -127,7 +123,7 @@ fn top_presenting_view_controller(
         if is_share_controller(&controller) {
             return Err(Error::AlreadyOpen);
         }
-        let Some(presented) = (unsafe { controller.presentedViewController() }) else {
+        let Some(presented) = controller.presentedViewController() else {
             return Ok(controller);
         };
         controller = presented;

@@ -326,7 +326,7 @@ impl RobiusMediaPickerDelegate {
                 return;
             }
         };
-        let suggested_name = unsafe { provider.suggestedName() }.map(|n| n.to_string());
+        let suggested_name = provider.suggestedName().map(|n| n.to_string());
 
         // The block below captures `provider` and a `MediaLoadGuard` that owns
         // the `pending` picker. This ensures that the pending picker is dropped
@@ -375,50 +375,42 @@ fn show_inner(
     let (picker, temp_path) = match kind {
         DialogKind::Open => {
             let content_types = content_types(&options);
-            let picker = unsafe {
-                UIDocumentPickerViewController::initForOpeningContentTypes_asCopy(
-                    UIDocumentPickerViewController::alloc(mtm),
-                    &content_types,
-                    true,
-                )
-            };
+            let picker = UIDocumentPickerViewController::initForOpeningContentTypes_asCopy(
+                UIDocumentPickerViewController::alloc(mtm),
+                &content_types,
+                true,
+            );
             (picker, None)
         }
         DialogKind::Save { source_path } => {
             let (export_path, temp_path) = export_source_path(&options, &source_path)?;
             let url = file_url(&export_path)?;
             let urls = NSArray::from_retained_slice(&[url]);
-            let picker = unsafe {
-                UIDocumentPickerViewController::initForExportingURLs_asCopy(
-                    UIDocumentPickerViewController::alloc(mtm),
-                    &urls,
-                    true,
-                )
-            };
+            let picker = UIDocumentPickerViewController::initForExportingURLs_asCopy(
+                UIDocumentPickerViewController::alloc(mtm),
+                &urls,
+                true,
+            );
             (picker, temp_path)
         }
         DialogKind::SaveData { temp_path } => {
             let url = file_url(&temp_path)?;
             let urls = NSArray::from_retained_slice(&[url]);
-            let picker = unsafe {
-                UIDocumentPickerViewController::initForExportingURLs_asCopy(
-                    UIDocumentPickerViewController::alloc(mtm),
-                    &urls,
-                    true,
-                )
-            };
+            let picker = UIDocumentPickerViewController::initForExportingURLs_asCopy(
+                UIDocumentPickerViewController::alloc(mtm),
+                &urls,
+                true,
+            );
             (picker, Some(temp_path))
         }
     };
 
-    unsafe {
-        picker.setAllowsMultipleSelection(false);
-        picker.setShouldShowFileExtensions(true);
-        picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-    }
+    picker.setAllowsMultipleSelection(false);
+    picker.setShouldShowFileExtensions(true);
+    picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
 
     if let Some(title) = options.title.as_deref() {
-        unsafe { picker.setTitle(Some(&NSString::from_str(title))) };
+        picker.setTitle(Some(&NSString::from_str(title)));
     }
 
     let initial_dir = options.directory.clone().or_else(
@@ -426,7 +418,7 @@ fn show_inner(
     );
     if let Some(directory) = initial_dir {
         if let Ok(url) = file_url(&directory) {
-            unsafe { picker.setDirectoryURL(Some(&url)) };
+            picker.setDirectoryURL(Some(&url));
         }
     }
 
@@ -442,9 +434,7 @@ fn show_inner(
     let picker_view_controller: Retained<UIViewController> = picker.into_super();
     let presentation_delegate = ProtocolObject::from_ref(&*delegate);
     set_presentation_delegate(&picker_view_controller, presentation_delegate);
-    unsafe {
-        presenter.presentViewController_animated_completion(&picker_view_controller, true, None);
-    }
+    presenter.presentViewController_animated_completion(&picker_view_controller, true, None);
     set_presentation_delegate(&picker_view_controller, presentation_delegate);
 
     Ok(())
@@ -491,7 +481,7 @@ fn show_media_inner(
     }
 
     if let Some(title) = options.title.as_deref() {
-        unsafe { picker.setTitle(Some(&NSString::from_str(title))) };
+        picker.setTitle(Some(&NSString::from_str(title)));
     }
 
     let pending = Box::new(PendingMediaPicker {
@@ -506,9 +496,7 @@ fn show_media_inner(
     let picker_view_controller: Retained<UIViewController> = picker.into_super();
     let presentation_delegate = ProtocolObject::from_ref(&*delegate);
     set_presentation_delegate(&picker_view_controller, presentation_delegate);
-    unsafe {
-        presenter.presentViewController_animated_completion(&picker_view_controller, true, None);
-    }
+    presenter.presentViewController_animated_completion(&picker_view_controller, true, None);
     set_presentation_delegate(&picker_view_controller, presentation_delegate);
 
     Ok(())
@@ -518,7 +506,7 @@ fn set_presentation_delegate(
     controller: &UIViewController,
     delegate: &ProtocolObject<dyn UIAdaptivePresentationControllerDelegate>,
 ) {
-    if let Some(presentation_controller) = unsafe { controller.presentationController() } {
+    if let Some(presentation_controller) = controller.presentationController() {
         unsafe {
             presentation_controller.setDelegate(Some(delegate));
         }
@@ -534,7 +522,7 @@ fn presenting_view_controller(mtm: MainThreadMarker) -> Result<Retained<UIViewCo
 
 fn active_window(application: &UIApplication) -> Option<Retained<UIWindow>> {
     #[allow(deprecated)]
-    if let Some(window) = unsafe { application.keyWindow() } {
+    if let Some(window) = application.keyWindow() {
         return Some(window);
     }
 
@@ -553,7 +541,7 @@ fn top_presenting_view_controller(
         if is_file_picker_controller(&controller) {
             return Err(Error::AlreadyOpen);
         }
-        let Some(presented) = (unsafe { controller.presentedViewController() }) else {
+        let Some(presented) = controller.presentedViewController() else {
             return Ok(controller);
         };
         controller = presented;
@@ -646,7 +634,7 @@ fn media_type_identifier(
     let image_uti = unsafe { UTTypeImage };
     let video_uti = unsafe { UTTypeMovie };
 
-    let conforms_to = |ut_type: &UTType| unsafe {
+    let conforms_to = |ut_type: &UTType| {
         provider.hasItemConformingToTypeIdentifier(&ut_type.identifier())
     };
 
@@ -658,9 +646,9 @@ fn media_type_identifier(
         video_uti
     } else {
         // Fall back to the first registered identifier if nothing conforms.
-        return unsafe { provider.registeredTypeIdentifiers() }.iter().next();
+        return provider.registeredTypeIdentifiers().iter().next();
     };
-    Some(unsafe { ut_type.identifier() })
+    Some(ut_type.identifier())
 }
 
 fn dismiss_media_picker(picker: &PHPickerViewController) {
@@ -671,9 +659,7 @@ fn dismiss_media_picker(picker: &PHPickerViewController) {
     };
     // Safe upcast: `PHPickerViewController`'s superclass is `UIViewController`.
     let picker: Retained<UIViewController> = picker.into_super();
-    unsafe {
-        picker.dismissViewControllerAnimated_completion(true, None);
-    }
+    picker.dismissViewControllerAnimated_completion(true, None);
 }
 
 /// A wrapper guart type that just owns a `PendingMediaPicker` instance
@@ -713,8 +699,8 @@ fn finish_media_picker(pending: *mut PendingMediaPicker, result: Result<Option<P
 }
 
 fn copy_media_file(url: &NSURL, suggested_name: Option<&str>) -> Result<PickedFile> {
-    if unsafe { url.isFileURL() } {
-        if let Some(path) = unsafe { url.path() } {
+    if url.isFileURL() {
+        if let Some(path) = url.path() {
             let source_path = resolve_regular_file(PathBuf::from(path.to_string()))?;
             let file_name = source_path
                 .file_name()
@@ -729,7 +715,7 @@ fn copy_media_file(url: &NSURL, suggested_name: Option<&str>) -> Result<PickedFi
         }
     }
 
-    let uri = unsafe { url.absoluteString() }
+    let uri = url.absoluteString()
         .map(|uri| uri.to_string())
         .unwrap_or_default();
     Ok(PickedFile::from_uri(uri))
@@ -744,7 +730,7 @@ fn content_types(options: &DialogOptions) -> Retained<NSArray<UTType>> {
         } else if mime_type == "video/*" {
             types.push(retained_ut_type(unsafe { UTTypeMovie }));
         } else if let Some(content_type) =
-            unsafe { UTType::typeWithMIMEType(&NSString::from_str(mime_type)) }
+            UTType::typeWithMIMEType(&NSString::from_str(mime_type))
         {
             types.push(content_type);
         }
@@ -760,7 +746,7 @@ fn content_types(options: &DialogOptions) -> Retained<NSArray<UTType>> {
             continue;
         }
         if let Some(content_type) =
-            unsafe { UTType::typeWithFilenameExtension(&NSString::from_str(extension)) }
+            UTType::typeWithFilenameExtension(&NSString::from_str(extension))
         {
             types.push(content_type);
         }
@@ -834,7 +820,7 @@ fn file_type_priority(path: &Path) -> u8 {
     let Some(ext) = path.extension().and_then(OsStr::to_str) else {
         return 1;
     };
-    let Some(ut_type) = (unsafe { UTType::typeWithFilenameExtension(&NSString::from_str(ext)) }) else {
+    let Some(ut_type) = UTType::typeWithFilenameExtension(&NSString::from_str(ext)) else {
         return 1;
     };
     if unsafe { ut_type.conformsToType(UTTypeImage) } {
@@ -866,12 +852,12 @@ fn unique_temp_directory() -> Result<PathBuf> {
 
 fn file_url(path: &Path) -> Result<Retained<NSURL>> {
     let path = path.to_str().ok_or(Error::InvalidFileName)?;
-    Ok(unsafe { NSURL::fileURLWithPath(&NSString::from_str(path)) })
+    Ok(NSURL::fileURLWithPath(&NSString::from_str(path)))
 }
 
 fn file_from_url(url: &NSURL, owned_temp: bool) -> PickedFile {
-    if unsafe { url.isFileURL() } {
-        if let Some(path) = unsafe { url.path() } {
+    if url.isFileURL() {
+        if let Some(path) = url.path() {
             let path = PathBuf::from(path.to_string());
             return if owned_temp {
                 PickedFile::from_owned_temp_path(path)
@@ -881,7 +867,7 @@ fn file_from_url(url: &NSURL, owned_temp: bool) -> PickedFile {
         }
     }
 
-    let uri = unsafe { url.absoluteString() }
+    let uri = url.absoluteString()
         .map(|uri| uri.to_string())
         .unwrap_or_default();
     PickedFile::from_uri(uri)
