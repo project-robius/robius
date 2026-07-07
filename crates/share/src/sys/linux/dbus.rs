@@ -26,13 +26,13 @@ struct Msg {
 const MAX_MSG: usize = 128 * 1024 * 1024;
 
 /// Open a local file through the portal, showing a prompt if `ask` is true.
-pub(super) fn open_path(parent: &str, path: &Path, ask: bool) -> io::Result<()> {
+pub(super) fn open_path(parent: &str, path: &Path, ask: bool) -> io::Result<Request> {
     let file = std::fs::File::open(path)?;
     Connection::session()?.open_file(parent, file.as_raw_fd(), ask)
 }
 
 /// Open a URI through the portal, showing a prompt if `ask` is true.
-pub(super) fn open_uri(parent: &str, uri: &str, ask: bool) -> io::Result<()> {
+pub(super) fn open_uri(parent: &str, uri: &str, ask: bool) -> io::Result<Request> {
     Connection::session()?.open_uri(parent, uri, ask)
 }
 
@@ -46,6 +46,17 @@ pub(super) fn save_files(parent: &str, title: &str, names: &[Vec<u8>]) -> io::Re
 struct Connection {
     stream: UnixStream,
     serial: u32,
+}
+
+pub(super) struct Request {
+    connection: Connection,
+    path: String,
+}
+
+impl Request {
+    pub(super) fn wait(mut self) -> io::Result<()> {
+        self.connection.await_response(&self.path)
+    }
 }
 
 impl Connection {
@@ -83,7 +94,7 @@ impl Connection {
         Ok(connection)
     }
 
-    fn open_file(mut self, parent: &str, fd: RawFd, ask: bool) -> io::Result<()> {
+    fn open_file(mut self, parent: &str, fd: RawFd, ask: bool) -> io::Result<Request> {
         let mut body = Vec::new();
         put_string(&mut body, parent); // parent window
         put_u32(&mut body, 0); // fd index
@@ -91,11 +102,11 @@ impl Connection {
         let serial = self.next_serial();
         let msg = method_call(serial, DEST, PATH, IFACE, "OpenFile", "sha{sv}", &body, 1);
         send_with_fd(&self.stream, &msg, fd)?;
-        let request = self.read_request_handle()?;
-        self.await_response(&request)
+        let path = self.read_request_handle()?;
+        Ok(Request { connection: self, path })
     }
 
-    fn open_uri(mut self, parent: &str, uri: &str, ask: bool) -> io::Result<()> {
+    fn open_uri(mut self, parent: &str, uri: &str, ask: bool) -> io::Result<Request> {
         let mut body = Vec::new();
         put_string(&mut body, parent); // parent window
         put_string(&mut body, uri);
@@ -103,8 +114,8 @@ impl Connection {
         let serial = self.next_serial();
         let msg = method_call(serial, DEST, PATH, IFACE, "OpenURI", "ssa{sv}", &body, 0);
         self.stream.write_all(&msg)?;
-        let request = self.read_request_handle()?;
-        self.await_response(&request)
+        let path = self.read_request_handle()?;
+        Ok(Request { connection: self, path })
     }
 
     fn save_files(mut self, parent: &str, title: &str, names: &[Vec<u8>]) -> io::Result<Vec<PathBuf>> {
@@ -152,25 +163,6 @@ impl Connection {
         }
     }
 
-    /// Wait for the portal's Response signal to our request.
-    fn await_response(&mut self, request: &str) -> io::Result<()> {
-        // same as above, basically a 5-min timeout
-        self.stream.set_read_timeout(Some(Duration::from_secs(300)))?;
-        loop {
-            match self.read_message() {
-                Ok(m)
-                    if m.mtype == 4
-                        && m.path.as_deref() == Some(request)
-                        && m.member.as_deref() == Some("Response") =>
-                {
-                    return Ok(())
-                }
-                Ok(_) => continue,
-                Err(_) => return Ok(()),
-            }
-        }
-    }
-
     fn read_message(&mut self) -> io::Result<Msg> {
         let mut head = [0u8; 16];
         self.stream.read_exact(&mut head)?;
@@ -208,6 +200,25 @@ impl Connection {
                 }
                 3 => return Err(err("portal returned an error")),
                 _ => continue,
+            }
+        }
+    }
+
+    /// Wait for the portal's Response signal to our request.
+    fn await_response(&mut self, request: &str) -> io::Result<()> {
+        // same as above, basically a 5-min timeout
+        self.stream.set_read_timeout(Some(Duration::from_secs(300)))?;
+        loop {
+            match self.read_message() {
+                Ok(m)
+                    if m.mtype == 4
+                        && m.path.as_deref() == Some(request)
+                        && m.member.as_deref() == Some("Response") =>
+                {
+                    return Ok(())
+                }
+                Ok(_) => continue,
+                Err(_) => return Ok(()),
             }
         }
     }

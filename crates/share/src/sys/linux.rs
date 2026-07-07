@@ -3,7 +3,7 @@ use std::{
     fs::OpenOptions,
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -19,7 +19,7 @@ pub(crate) fn share(options: ShareOptions) -> Result<()> {
 
 enum LinuxPayload {
     Uri(String),
-    Path(PathBuf),
+    Path { path: PathBuf, cleanup: bool },
     // A mixed payload has no single thing to "open", so we just save it to disk.
     Save { title: String, items: Vec<SaveItem> },
 }
@@ -47,7 +47,10 @@ impl LinuxPayload {
     fn new(options: &ShareOptions) -> Result<Self> {
         if options.items.len() == 1 {
             return match &options.items[0] {
-                ShareItem::Text(text) => Ok(Self::Path(write_temp_text_file(text)?)),
+                ShareItem::Text(text) => Ok(Self::Path {
+                    path: write_temp_text_file(text)?,
+                    cleanup: true,
+                }),
                 ShareItem::Url(url) => Ok(Self::Uri(url.clone())),
                 ShareItem::File(file) => file_payload(file),
             };
@@ -79,26 +82,57 @@ impl LinuxPayload {
     }
 
     fn open(self) -> Result<()> {
-        // Don't block the UI thread while the portal or file dialog is open.
-        std::thread::spawn(move || {
-            // Attempt to bring the portal or dialog to the front of teh screen.
-            let parent = parent_window();
-            match self {
-                LinuxPayload::Path(path) => {
-                    if dbus::open_path(&parent, &path, true).is_err() {
-                        let _ = open_with_xdg(path.into_os_string());
-                    }
-                }
-                LinuxPayload::Uri(uri) => {
-                    if dbus::open_uri(&parent, &uri, true).is_err() {
-                        let _ = open_with_xdg(OsString::from(uri));
-                    }
-                }
-                LinuxPayload::Save { title, items } => save_bundle(&parent, &title, items),
+        match self {
+            LinuxPayload::Path { path, cleanup } => open_path(path, cleanup),
+            LinuxPayload::Uri(uri) => open_uri(uri),
+            LinuxPayload::Save { title, items } => {
+                // Don't block the UI thread while the save dialog is open.
+                std::thread::Builder::new()
+                    .name("robius-share".to_owned())
+                    .spawn(move || {
+                        // Attempt to bring the portal or dialog to the front of the screen.
+                        let parent = parent_window();
+                        save_bundle(&parent, &title, items);
+                    })
+                    .map(|_| ())
+                    .map_err(Error::Io)
             }
-        });
-        Ok(())
+        }
     }
+}
+
+fn open_path(path: PathBuf, cleanup: bool) -> Result<()> {
+    let parent = parent_window();
+    if let Ok(request) = dbus::open_path(&parent, &path, true) {
+        return wait_for_portal_request(request, cleanup.then_some(path));
+    }
+
+    let result = open_with_xdg(path.clone().into_os_string());
+    if cleanup && result.is_err() {
+        remove_temp_file(&path);
+    }
+    result
+}
+
+fn open_uri(uri: String) -> Result<()> {
+    let parent = parent_window();
+    if let Ok(request) = dbus::open_uri(&parent, &uri, true) {
+        return wait_for_portal_request(request, None);
+    }
+    open_with_xdg(OsString::from(uri))
+}
+
+fn wait_for_portal_request(request: dbus::Request, cleanup: Option<PathBuf>) -> Result<()> {
+    std::thread::Builder::new()
+        .name("robius-share-portal".to_owned())
+        .spawn(move || {
+            let _ = request.wait();
+            if let Some(path) = cleanup {
+                remove_temp_file(&path);
+            }
+        })
+        .map(|_| ())
+        .map_err(Error::Io)
 }
 
 /// Ask the portal to save the bundle to a folder, then write each item there.
@@ -120,7 +154,7 @@ fn save_bundle(parent: &str, title: &str, items: Vec<SaveItem>) {
                 }
             }
         }
-        // Err means no d-bus portal, so just open the first item with `xdg-open`` instead.
+        // Err means no d-bus portal, so just open the first item with `xdg-open` instead.
         Err(_) => {
             let arg = items
                 .iter()
@@ -214,7 +248,7 @@ fn parent_window() -> String {
         .unwrap_or_default()
 }
 
-/// REturns the current X11 window ID (`_NET_ACTIVE_WINDOW`) via xprop.
+/// Returns the current X11 window ID (`_NET_ACTIVE_WINDOW`) via xprop.
 fn active_x11_window() -> Option<u64> {
     let output = Command::new("xprop")
         .args(["-root", "-notype", "_NET_ACTIVE_WINDOW"])
@@ -272,16 +306,26 @@ fn dedup_names(items: &mut [SaveItem]) {
 fn file_payload(file: &SharedFile) -> Result<LinuxPayload> {
     if let Some(path) = file.path() {
         let path = std::fs::canonicalize(path)?;
-        return Ok(LinuxPayload::Path(path));
+        return Ok(LinuxPayload::Path {
+            path,
+            cleanup: false,
+        });
     }
 
     let uri = file.uri().ok_or(Error::InvalidItem)?;
     if let Some(path) = file_uri_to_path(uri) {
         std::fs::metadata(&path)?;
-        return Ok(LinuxPayload::Path(path));
+        return Ok(LinuxPayload::Path {
+            path,
+            cleanup: false,
+        });
     }
 
     Ok(LinuxPayload::Uri(uri.to_owned()))
+}
+
+fn remove_temp_file(path: &Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 fn open_with_xdg(arg: OsString) -> Result<()> {

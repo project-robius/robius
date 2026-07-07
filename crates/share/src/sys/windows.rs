@@ -3,7 +3,7 @@ use std::{
     ffi::OsString,
     os::windows::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 use windows::{
@@ -49,31 +49,40 @@ pub(crate) fn share(options: ShareOptions) -> Result<()> {
     let interop: IDataTransferManagerInterop =
         factory::<DataTransferManager, IDataTransferManagerInterop>()?;
     let manager: DataTransferManager = unsafe { interop.GetForWindow(hwnd)? };
+    let active_token = Arc::new(Mutex::new(None));
+    let handler_token = active_token.clone();
+    let handler_hwnd = hwnd.0;
 
     // The handler does no async work now that the storage items are pre-resolved,
     // so it can fill the request synchronously without a deferral or worker thread.
     let handler = TypedEventHandler::new(
         move |_sender: &Option<DataTransferManager>,
               args: &Option<DataRequestedEventArgs>| {
-            if let Some(args) = args {
-                let request = args.Request()?;
-                if fill_request(&options, &storage_items, &request).is_err() {
-                    let _ = request.FailWithDisplayText(&HSTRING::from(
-                        "Unable to prepare the share payload.",
-                    ));
+            let result = (|| {
+                if let Some(args) = args {
+                    let request = args.Request()?;
+                    if fill_request(&options, &storage_items, &request).is_err() {
+                        let _ = request.FailWithDisplayText(&HSTRING::from(
+                            "Unable to prepare the share payload.",
+                        ));
+                    }
                 }
-            }
-            Ok(())
+                Ok(())
+            })();
+            remove_current_registration(handler_hwnd, handler_token.as_ref());
+            result
         },
     );
 
     let token = manager.DataRequested(&handler)?;
+    if let Ok(mut active_token) = active_token.lock() {
+        *active_token = Some(token);
+    }
     record_registration(hwnd.0, token);
 
     if let Err(error) = unsafe { interop.ShowShareUIForWindow(hwnd) } {
         // The UI never appeared, so the handler will never fire: remove it now.
-        let _ = manager.RemoveDataRequested(token);
-        forget_registration(hwnd.0, token);
+        remove_current_registration(hwnd.0, active_token.as_ref());
         return Err(error.into());
     }
 
@@ -108,6 +117,21 @@ fn remove_stale_registration(hwnd: isize) {
         let manager: DataTransferManager = unsafe { interop.GetForWindow(HWND(hwnd)) }?;
         manager.RemoveDataRequested(token)
     });
+}
+
+fn remove_current_registration(
+    hwnd: isize,
+    active_token: &Mutex<Option<EventRegistrationToken>>,
+) {
+    let Some(token) = active_token.lock().ok().and_then(|mut token| token.take()) else {
+        return;
+    };
+
+    let _ = factory::<DataTransferManager, IDataTransferManagerInterop>().and_then(|interop| {
+        let manager: DataTransferManager = unsafe { interop.GetForWindow(HWND(hwnd)) }?;
+        manager.RemoveDataRequested(token)
+    });
+    forget_registration(hwnd, token);
 }
 
 /// Resolves the share payload's file attachments to WinRT [`IStorageItem`]s.

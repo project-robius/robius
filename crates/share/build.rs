@@ -26,25 +26,32 @@ fn main() {
             "javac invocation failed"
         );
 
-        let class_file = out_dir
+        let class_dir = out_dir
             .join("robius")
-            .join("share")
-            .join("ShareSheet.class");
+            .join("share");
+        let mut class_files = std::fs::read_dir(&class_dir)
+            .expect("failed to read javac output directory")
+            .map(|entry| entry.expect("failed to read javac output entry").path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "class"))
+            .collect::<Vec<_>>();
+        class_files.sort();
 
         let d8_jar_path = android_build::android_d8_jar(None).expect("Failed to find d8.jar");
+        let mut d8 = android_build::JavaRun::new();
+        d8.class_path(d8_jar_path)
+            .main_class("com.android.tools.r8.D8")
+            .arg("--classpath")
+            .arg(android_jar_path)
+            .arg("--min-api")
+            .arg("26")
+            .arg("--output")
+            .arg(&out_dir);
+        for class_file in &class_files {
+            d8.arg(class_file);
+        }
 
         assert!(
-            android_build::JavaRun::new()
-                .class_path(d8_jar_path)
-                .main_class("com.android.tools.r8.D8")
-                .arg("--classpath")
-                .arg(android_jar_path)
-                .arg("--min-api")
-                .arg("26")
-                .arg("--output")
-                .arg(&out_dir)
-                .arg(&class_file)
-                .run()
+            d8.run()
                 .expect("failed to acquire exit status for java d8.jar invocation")
                 .success(),
             "java d8.jar invocation failed"

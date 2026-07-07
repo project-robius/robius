@@ -38,15 +38,82 @@ public class ShareSheet {
             String text,
             String[] fileLocations,
             String[] mimeTypes) {
+        if (activity == null) {
+            return RESULT_ERROR;
+        }
+
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            return shareOnUiThread(activity, title, subject, text, fileLocations, mimeTypes);
+            if (activity.isFinishing() || activity.isDestroyed()) {
+                return RESULT_ERROR;
+            }
+            return shareAsync(activity, title, subject, text, fileLocations, mimeTypes);
+        }
+
+        return prepareAndShare(activity, title, subject, text, fileLocations, mimeTypes);
+    }
+
+    private static int shareAsync(
+            Activity activity,
+            String title,
+            String subject,
+            String text,
+            String[] fileLocations,
+            String[] mimeTypes) {
+        try {
+            new Thread(() -> {
+                PreparedSharePayload payload = prepareSharePayload(
+                        activity,
+                        text,
+                        fileLocations,
+                        mimeTypes);
+                if (payload == null) {
+                    return;
+                }
+                activity.runOnUiThread(() -> launchPreparedShare(
+                        activity,
+                        title,
+                        subject,
+                        payload));
+            }, "robius-share").start();
+            return RESULT_OK;
+        } catch (Throwable e) {
+            return RESULT_ERROR;
+        }
+    }
+
+    private static int prepareAndShare(
+            Activity activity,
+            String title,
+            String subject,
+            String text,
+            String[] fileLocations,
+            String[] mimeTypes) {
+        PreparedSharePayload payload = prepareSharePayload(
+                activity,
+                text,
+                fileLocations,
+                mimeTypes);
+        if (payload == null) {
+            return RESULT_ERROR;
+        }
+
+        return launchPreparedShareOnUiThread(activity, title, subject, payload);
+    }
+
+    private static int launchPreparedShareOnUiThread(
+            Activity activity,
+            String title,
+            String subject,
+            PreparedSharePayload payload) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            return launchPreparedShare(activity, title, subject, payload);
         }
 
         AtomicInteger result = new AtomicInteger(RESULT_ERROR);
         CountDownLatch uiThreadFinished = new CountDownLatch(1);
         activity.runOnUiThread(() -> {
             try {
-                result.set(shareOnUiThread(activity, title, subject, text, fileLocations, mimeTypes));
+                result.set(launchPreparedShare(activity, title, subject, payload));
             } finally {
                 uiThreadFinished.countDown();
             }
@@ -67,39 +134,32 @@ public class ShareSheet {
         return result.get();
     }
 
-    private static int shareOnUiThread(
+    private static PreparedSharePayload prepareSharePayload(
             Activity activity,
-            String title,
-            String subject,
             String text,
             String[] fileLocations,
             String[] mimeTypes) {
-        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
-            return RESULT_ERROR;
+        if (activity == null) {
+            return null;
         }
 
         int fileCount = fileLocations == null ? 0 : fileLocations.length;
         boolean hasText = text != null && !text.isEmpty();
-        boolean hasSubject = subject != null && !subject.isEmpty();
-        if (!hasText && !hasSubject && fileCount == 0) {
-            return RESULT_ERROR;
-        }
-
         ArrayList<Uri> streams = new ArrayList<>(fileCount);
         ArrayList<String> streamMimeTypes = new ArrayList<>(fileCount);
         StringBuilder fallbackText = null;
         for (int i = 0; i < fileCount; i++) {
             String mimeType = mimeTypeAt(mimeTypes, i);
-            Uri uri = resolveShareableFileUri(activity, fileLocations[i], mimeType);
-            if (uri != null) {
-                streams.add(uri);
-                streamMimeTypes.add(mimeType);
+            ShareableFile shareable = resolveShareableFile(activity, fileLocations[i], mimeType);
+            if (shareable != null) {
+                streams.add(shareable.uri);
+                streamMimeTypes.add(shareable.mimeType);
                 continue;
             }
 
             String textFile = readTextFileFallback(fileLocations[i], mimeType);
             if (textFile == null) {
-                return RESULT_ERROR;
+                return null;
             }
             if (fallbackText == null) {
                 fallbackText = new StringBuilder();
@@ -110,41 +170,59 @@ public class ShareSheet {
             fallbackText.append(textFile);
         }
 
+        String preparedText = text;
         if (fallbackText != null) {
             if (hasText) {
-                text = text + "\n" + fallbackText;
+                preparedText = text + "\n" + fallbackText;
             } else {
-                text = fallbackText.toString();
-                hasText = true;
+                preparedText = fallbackText.toString();
             }
         }
 
-        Intent intent = new Intent(streams.size() > 1
+        return new PreparedSharePayload(preparedText, streams, streamMimeTypes);
+    }
+
+    private static int launchPreparedShare(
+            Activity activity,
+            String title,
+            String subject,
+            PreparedSharePayload payload) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
+            return RESULT_ERROR;
+        }
+
+        boolean hasText = payload.text != null && !payload.text.isEmpty();
+        boolean hasSubject = subject != null && !subject.isEmpty();
+        if (!hasText && !hasSubject && payload.streams.isEmpty()) {
+            return RESULT_ERROR;
+        }
+
+        Intent intent = new Intent(payload.streams.size() > 1
                 ? Intent.ACTION_SEND_MULTIPLE
                 : Intent.ACTION_SEND);
         intent.setType(primaryMimeType(
-                streamMimeTypes.toArray(new String[0]),
+                payload.streamMimeTypes.toArray(new String[0]),
                 hasText));
 
         if (hasText) {
-            intent.putExtra(Intent.EXTRA_TEXT, text);
+            intent.putExtra(Intent.EXTRA_TEXT, payload.text);
         }
         if (hasSubject) {
             intent.putExtra(Intent.EXTRA_SUBJECT, subject);
         }
 
-        if (streams.size() == 1) {
-            Uri uri = streams.get(0);
+        if (payload.streams.size() == 1) {
+            Uri uri = payload.streams.get(0);
             intent.putExtra(Intent.EXTRA_STREAM, uri);
             intent.setClipData(ClipData.newUri(
                     activity.getContentResolver(),
                     "shared file",
                     uri));
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } else if (streams.size() > 1) {
+        } else if (payload.streams.size() > 1) {
             ClipData clipData = null;
-            for (int i = 0; i < streams.size(); i++) {
-                Uri uri = streams.get(i);
+            for (int i = 0; i < payload.streams.size(); i++) {
+                Uri uri = payload.streams.get(i);
                 if (clipData == null) {
                     clipData = ClipData.newUri(
                             activity.getContentResolver(),
@@ -154,7 +232,7 @@ public class ShareSheet {
                     clipData.addItem(new ClipData.Item(uri));
                 }
             }
-            intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, streams);
+            intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, payload.streams);
             intent.setClipData(clipData);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         }
@@ -173,14 +251,14 @@ public class ShareSheet {
         }
     }
 
-    private static Uri resolveShareableFileUri(Activity activity, String location, String mimeType) {
+    private static ShareableFile resolveShareableFile(Activity activity, String location, String mimeType) {
         if (location == null || location.isEmpty()) {
             return null;
         }
 
         Uri parsed = Uri.parse(location);
         if ("content".equals(parsed.getScheme())) {
-            return parsed;
+            return new ShareableFile(parsed, normalizedContentMimeType(activity, parsed, mimeType));
         }
 
         File file = fileFromLocation(location, parsed);
@@ -189,7 +267,11 @@ public class ShareSheet {
         }
 
         if (Build.VERSION.SDK_INT >= 29) {
-            return copyFileToMediaStore(activity, file, mimeType);
+            String normalizedMimeType = normalizedMimeType(file, mimeType);
+            Uri uri = copyFileToMediaStore(activity, file, normalizedMimeType);
+            if (uri != null) {
+                return new ShareableFile(uri, normalizedMimeType);
+            }
         }
 
         return null;
@@ -213,9 +295,7 @@ public class ShareSheet {
         try {
             ContentValues values = new ContentValues();
             values.put(MediaStore.MediaColumns.DISPLAY_NAME, file.getName());
-            values.put(
-                    MediaStore.MediaColumns.MIME_TYPE,
-                    normalizedMimeType(file, mimeType));
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
             values.put(
                     MediaStore.MediaColumns.RELATIVE_PATH,
                     Environment.DIRECTORY_DOWNLOADS + "/Robius Share");
@@ -313,6 +393,22 @@ public class ShareSheet {
         return "application/octet-stream";
     }
 
+    private static String normalizedContentMimeType(Activity activity, Uri uri, String mimeType) {
+        if (mimeType != null && !mimeType.isEmpty()) {
+            return mimeType;
+        }
+
+        try {
+            String resolved = activity.getContentResolver().getType(uri);
+            if (resolved != null && !resolved.isEmpty()) {
+                return resolved;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return null;
+    }
+
     private static String mimeTypeAt(String[] mimeTypes, int index) {
         if (mimeTypes == null || index >= mimeTypes.length) {
             return null;
@@ -354,5 +450,30 @@ public class ShareSheet {
             return mimeTypes[0];
         }
         return primary + "/*";
+    }
+
+    private static final class PreparedSharePayload {
+        final String text;
+        final ArrayList<Uri> streams;
+        final ArrayList<String> streamMimeTypes;
+
+        PreparedSharePayload(
+                String text,
+                ArrayList<Uri> streams,
+                ArrayList<String> streamMimeTypes) {
+            this.text = text;
+            this.streams = streams;
+            this.streamMimeTypes = streamMimeTypes;
+        }
+    }
+
+    private static final class ShareableFile {
+        final Uri uri;
+        final String mimeType;
+
+        ShareableFile(Uri uri, String mimeType) {
+            this.uri = uri;
+            this.mimeType = mimeType;
+        }
     }
 }
