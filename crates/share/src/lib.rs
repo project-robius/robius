@@ -23,7 +23,7 @@
 //!   * A single file or URL is shared via the "Open With" app chooser.
 //!   * A mixed payload (multiple items) will open a save files dialog,
 //!     and write each item to the directory chosen by the user.
-//!   * If the d-bus portal doesn't work or isn't available, it alls back to `xdg-open`.
+//!   * If the d-bus portal doesn't work or isn't available, it falls back to `xdg-open`.
 //!
 //! ## Completion
 //! * On macOS, iOS, and Windows, a successful `share()` means the native share sheet
