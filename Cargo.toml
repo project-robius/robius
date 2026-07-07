@@ -1,8 +1,12 @@
 [workspace]
-resolver = "3"
+resolver = "2"
 
 members = [
     "crates/*",
+]
+
+exclude = [
+    "examples/example-share-sheet",
 ]
 
 # Note: we haven't yet implemented the top-level crate of re-exports.
@@ -43,10 +47,13 @@ repository = "https://github.com/project-robius/robius"
 
 [workspace.dependencies]
 ## General dependencies (target-independent) used in multiple crates in the workspace.
+robius-common = { version = "0.2.0", path = "crates/common" }
 cfg-if = "1.0.0"
 log = "0.4"
 retry = "2.0.0"
 tokio = { version = "1.43.1", default-features = false }
+
+
 
 
 ## Android-specific dependencies used in multiple crates in the workspace.
@@ -56,22 +63,23 @@ robius-android-env = "0.2.0"
 
 ## Apple-specific dependencies (iOS/macOS) used in multiple crates in the workspace.
 block2 = "0.6.1"
-dispatch2 = { version = "0.3.0", default-features = false, features = ["std"] }
-objc2 = "0.6.1"
-objc2-app-kit                  = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-authentication-services  = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-core-location            = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-foundation               = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-local-authentication     = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-photos                   = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-photos-ui                = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-ui-kit                   = { version = "0.3.1", default-features = false, features = ["std"] }
-objc2-uniform-type-identifiers = { version = "0.3.1", default-features = false, features = ["std"] }
+dispatch2 = { version = "0.3.1", default-features = false, features = ["std"] }
+objc2 = "0.6.4"
+objc2-app-kit                  = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-authentication-services  = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-location            = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-foundation               = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-local-authentication     = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-photos                   = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-photos-ui                = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-ui-kit                   = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = ["std"] }
 
 
 ## Linux-specific dependencies used in multiple crates in the workspace.
 zbus = "5.12.0"
 zbus_polkit = "5.0.0"
+libc = "0.2"
 
 ## Windows-specific dependencies used in multiple crates in the workspace.
 windows-core = { version = "0.56.0", default-features = false }

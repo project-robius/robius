@@ -1,15 +1,16 @@
 [package]
-name = "robius-file-picker"
+name = "robius-share"
 version.workspace = true
 edition.workspace = true
+rust-version = "1.77.0"
 authors = [
     "Kevin Boos <kevinaboos@gmail.com>",
     "Project Robius Maintainers",
 ]
-description = "Rust abstractions for showing native file and media pickers on multiple platforms"
-documentation = "https://docs.rs/robius-file-picker"
+description = "Rust abstractions for showing native system share sheets on multiple platforms"
+documentation = "https://docs.rs/robius-share"
 homepage.workspace = true
-keywords = ["robius", "file", "picker", "dialog", "native"]
+keywords = ["robius", "share", "sheet", "intent", "native"]
 categories.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -31,50 +32,60 @@ robius-common.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
-mime_guess = "2.0.5"
 robius-android-env.workspace = true
 
 
-[target.'cfg(target_os = "ios")'.dependencies]
-block2.workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dispatch2 = { workspace = true, features = ["objc2"] }
 objc2.workspace = true
 objc2-foundation = { workspace = true, features = [
     "NSArray",
-    "NSError",
-    "NSItemProvider",
     "NSEnumerator",
     "NSObject",
-    "NSProgress",
     "NSString",
     "NSURL",
-    "block2",
 ] }
-objc2-photos-ui = { workspace = true, features = ["PHPicker"] }
+
+
+[target.'cfg(target_os = "ios")'.dependencies]
 objc2-ui-kit = { workspace = true, features = [
-    "alloc",
-    "block2",
     "UIApplication",
+    "UIActivity",
+    "UIActivityViewController",
+    "UIPopoverPresentationController",
     "UIPresentationController",
-    "UIDocumentPickerViewController",
     "UIResponder",
     "UIView",
     "UIViewController",
     "UIWindow",
-    "objc2-uniform-type-identifiers",
-] }
-objc2-uniform-type-identifiers = { workspace = true, features = [
-    "UTCoreTypes",
-    "UTType",
+    "block2",
+    "objc2-core-foundation",
 ] }
 
 
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
-robius-directories = { path = "../directories" }
-
-
-## On macOS the native file panels must run on the main thread,
-## which we accomplish via GCD (grand central dispatch).
 [target.'cfg(target_os = "macos")'.dependencies]
-dispatch2 = { workspace = true, features = ["objc2"] }
+objc2-app-kit = { workspace = true, features = [
+    "NSApplication",
+    "NSResponder",
+    "NSSharingService",
+    "NSView",
+    "NSWindow",
+    "objc2-core-foundation",
+] }
+
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "ApplicationModel_DataTransfer",
+    "Foundation",
+    "Foundation_Collections",
+    "implement",
+    "Storage",
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
