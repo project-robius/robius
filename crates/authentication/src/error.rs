@@ -2,7 +2,8 @@
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// An error produced during authentication.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+#[cfg_attr(not(target_os = "android"), derive(Clone))]
 pub enum Error {
     // TODO: Reexport jni::errors::Error
     // TODO: Remove target cfg

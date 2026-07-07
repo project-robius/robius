@@ -41,7 +41,7 @@ define_class!(
             // Deprecated for multi-scene apps, fine for single-scene.
             // Swap for a connectedScenes lookup if your app uses scenes.
             #[allow(deprecated)]
-            let window: Option<Retained<UIWindow>> = unsafe { app.keyWindow() }
+            let window: Option<Retained<UIWindow>> = app.keyWindow()
                 .or_else(|| {
                     #[allow(deprecated)]
                     let windows = app.windows();
@@ -146,7 +146,7 @@ where
 
     run_on_main(move |mtm| -> Result<Handle> {
         let url_ns = NSString::from_str(&url);
-        let url_obj = unsafe { NSURL::URLWithString(&url_ns) }.ok_or(Error::MalformedUri)?;
+        let url_obj = NSURL::URLWithString(&url_ns).ok_or(Error::MalformedUri)?;
         let scheme_ns = NSString::from_str(&callback_scheme);
 
         let context_provider = PresentationContextProvider::new(mtm);
@@ -192,7 +192,7 @@ where
                 }
             } else if !callback_url.is_null() {
                 let url = unsafe { &*callback_url };
-                Ok(unsafe { url.absoluteString() }
+                Ok(url.absoluteString()
                     .map(|s| s.to_string())
                     .unwrap_or_default())
             } else {

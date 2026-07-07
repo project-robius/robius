@@ -2,6 +2,7 @@
 name = "robius-web-auth-session"
 version.workspace = true
 edition.workspace = true
+rust-version = "1.71.0"
 authors = [
     "Kevin Boos <kevinaboos@gmail.com>",
     "Project Robius Maintainers",

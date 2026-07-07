@@ -23,7 +23,7 @@
 //! use robius_open::Uri;
 //! Uri::new("http://www.google.com")
 //!    .open_with_completion(|success| {
-//!       log!("Opened URI? {success}");
+//!       println!("Opened URI? {success}");
 //!    })
 //!    .expect("failed to open URL");
 //! ```

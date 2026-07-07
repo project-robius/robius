@@ -805,7 +805,7 @@ fn resolve_regular_file(path: PathBuf) -> Result<PathBuf> {
                 continue;
             }
             let priority = file_type_priority(&p);
-            if best.as_ref().is_none_or(|(best_prio, _)| priority > *best_prio) {
+            if best.as_ref().map_or(true, |(best_prio, _)| priority > *best_prio) {
                 best = Some((priority, p));
             }
         }
