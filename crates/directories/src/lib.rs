@@ -60,7 +60,7 @@ use lin as sys;
 /// All examples on this page are computed with a user named _Alice_.
 ///
 /// ```
-/// use robius-directories::BaseDirs;
+/// use robius_directories::BaseDirs;
 /// if let Some(base_dirs) = BaseDirs::new() {
 ///     base_dirs.config_dir();
 ///     // Linux:   /home/alice/.config
@@ -92,7 +92,7 @@ pub struct BaseDirs {
 /// All examples on this page are computed with a user named _Alice_.
 ///
 /// ```
-/// use robius-directories::UserDirs;
+/// use robius_directories::UserDirs;
 /// if let Some(user_dirs) = UserDirs::new() {
 ///     user_dirs.audio_dir();
 ///     // Linux:   /home/alice/Music
@@ -127,7 +127,7 @@ pub struct UserDirs {
 /// and a `ProjectDirs` struct created with `ProjectDirs::from("com", "Foo Corp", "Bar App")`.
 ///
 /// ```
-/// use robius-directories::ProjectDirs;
+/// use robius_directories::ProjectDirs;
 /// if let Some(proj_dirs) = ProjectDirs::from("com", "Foo Corp",  "Bar App") {
 ///     proj_dirs.config_dir();
 ///     // Linux:   /home/alice/.config/barapp

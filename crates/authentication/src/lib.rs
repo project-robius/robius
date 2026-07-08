@@ -36,8 +36,8 @@
 //!
 //! let callback = |auth_result| {
 //!     match auth_result {
-//!         Ok(_)  => log::info!("Authentication success!"),
-//!         Err(_) => log::error!(Authentication failed!"),
+//!         Ok(_)  => println!("Authentication success!"),
+//!         Err(_) => eprintln!("Authentication failed!"),
 //!     }
 //! };
 //!

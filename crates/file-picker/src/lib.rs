@@ -113,7 +113,7 @@ impl FileDialog {
     ///
     /// Passing an empty set clears all filters, including those previously added via `add_filter()`.
     ///
-    /// ```norun
+    /// ```no_run
     /// # use robius_file_picker::FileDialog;
     /// let dialog = FileDialog::new().set_filters([
     ///     ("Images", &["png", "jpg"]),

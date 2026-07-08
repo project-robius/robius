@@ -2,6 +2,7 @@
 name = "robius-file-picker"
 version.workspace = true
 edition.workspace = true
+rust-version = "1.88.0"
 authors = [
     "Kevin Boos <kevinaboos@gmail.com>",
     "Project Robius Maintainers",

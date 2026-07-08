@@ -2,6 +2,7 @@
 name = "robius-common"
 version.workspace = true
 edition.workspace = true
+rust-version = "1.64.0"
 authors = [
     "Kevin Boos <kevinaboos@gmail.com>",
     "Project Robius Maintainers",
