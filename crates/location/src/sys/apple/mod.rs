@@ -5,15 +5,16 @@ use std::time::{Duration, SystemTime};
 use delegate::RobiusLocationDelegate as Delegate;
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_core_location::{
-    CLLocation, CLLocationCoordinate2D, CLLocationManager, CLLocationManagerDelegate,
+    kCLLocationAccuracyBest, kCLLocationAccuracyKilometer, CLAuthorizationStatus, CLLocation,
+    CLLocationCoordinate2D, CLLocationManager, CLLocationManagerDelegate,
 };
 
 use crate::{Access, Accuracy, Coordinates, Handler, Result};
 
 pub(crate) struct Manager {
     inner: Retained<CLLocationManager>,
-    // We must not to drop the Delegate/handler until the manager itself is dropped.
-    _delegate: Retained<ProtocolObject<dyn CLLocationManagerDelegate>>,
+    // Held for the manager's lifetime, and kept as the concrete type so we can queue up held requests.
+    delegate: Retained<Delegate>,
 }
 
 impl Manager {
@@ -26,15 +27,22 @@ impl Manager {
         let mtm = objc2::MainThreadMarker::new()
             .ok_or(crate::Error::NotMainThread)?;
         let inner = unsafe { CLLocationManager::new() };
-        let delegate = ProtocolObject::from_retained(Delegate::new(mtm, handler));
-        unsafe { inner.setDelegate(Some(&delegate)) };
-        Ok(Self {
-            inner,
-            _delegate: delegate,
-        })
+        let delegate = Delegate::new(mtm, handler);
+        let protocol: &ProtocolObject<dyn CLLocationManagerDelegate> =
+            ProtocolObject::from_ref(&*delegate);
+        unsafe { inner.setDelegate(Some(protocol)) };
+        Ok(Self { inner, delegate })
     }
 
-    pub(crate) fn request_authorization(&self, access: Access, _: Accuracy) -> Result<()> {
+    pub(crate) fn request_authorization(&self, access: Access, accuracy: Accuracy) -> Result<()> {
+        // Hint the desired precision; `kCLLocationAccuracyKilometer` matches an approximate request.
+        let desired = unsafe {
+            match accuracy {
+                Accuracy::Precise => kCLLocationAccuracyBest,
+                Accuracy::Approximate => kCLLocationAccuracyKilometer,
+            }
+        };
+        unsafe { self.inner.setDesiredAccuracy(desired) };
         match access {
             Access::Foreground => unsafe { self.inner.requestWhenInUseAuthorization(); },
             Access::Background => unsafe { self.inner.requestAlwaysAuthorization(); },
@@ -43,16 +51,31 @@ impl Manager {
     }
 
     pub(crate) fn update_once(&self) -> Result<()> {
-        unsafe { self.inner.requestLocation(); }
+        // `requestLocation` fails (rather than waiting) if called before authorization is granted,
+        // so while the status is undetermined we defer it until `didChangeAuthorization` fires.
+        match unsafe { self.inner.authorizationStatus() } {
+            CLAuthorizationStatus::NotDetermined => self.delegate.defer_update_once(),
+            _ => {
+                self.delegate.begin_one_shot(&self.inner); // deliver the cached fix first, then refine
+                unsafe { self.inner.requestLocation() };
+            }
+        }
         Ok(())
     }
 
     pub(crate) fn start_updates(&self) -> Result<()> {
-        unsafe { self.inner.startUpdatingLocation(); }
+        match unsafe { self.inner.authorizationStatus() } {
+            CLAuthorizationStatus::NotDetermined => self.delegate.defer_start_updates(),
+            _ => {
+                self.delegate.begin_continuous();
+                unsafe { self.inner.startUpdatingLocation() };
+            }
+        }
         Ok(())
     }
 
     pub(crate) fn stop_updates(&self) -> Result<()> {
+        self.delegate.cancel_deferred_start_updates();
         unsafe { self.inner.stopUpdatingLocation(); }
         Ok(())
     }

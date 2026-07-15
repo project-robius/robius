@@ -4,9 +4,6 @@ A Rust library to access system-provided location/GPS data across multiple platf
 
 Currently supports iOS, macOS, Windows, and Android, with Linux support coming soon.
 
-**There is a known problem on Android** in which the request-permissions prompt displayed to the user may not always appear and the application may crash (but will then work permanently on the next run); see [issue #2](https://github.com/project-robius/robius/issues/2).
-
-
 ## Usage on iOS
 To use this crate on iOS, you must add the following to your app's `Info.plist`:
 ```xml

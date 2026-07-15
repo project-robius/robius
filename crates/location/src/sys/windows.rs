@@ -6,19 +6,24 @@ use std::{
 
 use windows::{
     Devices::Geolocation::{
-        Geocoordinate, GeolocationAccessStatus, Geolocator, PositionStatus, StatusChangedEventArgs,
+        Geocoordinate, GeolocationAccessStatus, Geolocator, PositionAccuracy,
+        PositionChangedEventArgs, PositionStatus, StatusChangedEventArgs,
     },
-    Foundation::{EventRegistrationToken, TypedEventHandler},
+    Foundation::{EventRegistrationToken, TimeSpan, TypedEventHandler},
 };
 
 use crate::{Access, Accuracy, Coordinates, Error, Handler, Result};
 
 pub(crate) struct Manager {
     inner: Arc<Geolocator>,
-    handler: TypedEventHandler<Geolocator, StatusChangedEventArgs>,
+    // Delivers status transitions and errors.
+    status_handler: TypedEventHandler<Geolocator, StatusChangedEventArgs>,
+    // Delivers continuous position updates (`StatusChanged` alone never streams positions).
+    position_handler: TypedEventHandler<Geolocator, PositionChangedEventArgs>,
     // NOTE: Technically the Mutex isn't necessary, but removing it requires some finnicky unsafe.
     rust_handler: Arc<Mutex<dyn Handler>>,
-    token: Option<EventRegistrationToken>,
+    status_token: Option<EventRegistrationToken>,
+    position_token: Option<EventRegistrationToken>,
 }
 
 impl Manager {
@@ -30,22 +35,15 @@ impl Manager {
         let rust_handler = Arc::new(Mutex::new(handler));
         let rust_handler_cloned = rust_handler.clone();
 
-        let event_handler: TypedEventHandler<Geolocator, StatusChangedEventArgs> =
+        let status_handler: TypedEventHandler<Geolocator, StatusChangedEventArgs> =
             TypedEventHandler::new(
-                move |geolocator: &Option<Geolocator>, status: &Option<StatusChangedEventArgs>| {
+                move |_geolocator: &Option<Geolocator>, status: &Option<StatusChangedEventArgs>| {
                     if let Ok(handler) = rust_handler_cloned.lock() {
                         match status.as_ref() {
                             Some(status) => match status.Status() {
                                 Ok(status) => match status {
-                                    PositionStatus::Ready => {
-                                        if let Some(geolocator) = geolocator.as_ref() {
-                                            if let Ok(location) = get_location(geolocator) {
-                                                handler.handle(location)
-                                            }
-                                        } else {
-                                            handler.error(Error::Unknown);
-                                        }
-                                    }
+                                    // `position_handler` owns location delivery; this only reports status.
+                                    PositionStatus::Ready => {}
                                     PositionStatus::Initializing => {}
                                     PositionStatus::NoData => {
                                         handler.error(Error::TemporarilyUnavailable)
@@ -69,15 +67,46 @@ impl Manager {
                 },
             );
 
+        let rust_handler_position = rust_handler.clone();
+        let position_handler: TypedEventHandler<Geolocator, PositionChangedEventArgs> =
+            TypedEventHandler::new(
+                move |_geolocator: &Option<Geolocator>, args: &Option<PositionChangedEventArgs>| {
+                    if let Ok(handler) = rust_handler_position.lock() {
+                        if let Some(coordinate) = args
+                            .as_ref()
+                            .and_then(|args| args.Position().ok())
+                            .and_then(|position| position.Coordinate().ok())
+                        {
+                            handler.handle(crate::Location {
+                                inner: Location {
+                                    inner: coordinate,
+                                    _phantom_data: PhantomData,
+                                },
+                            });
+                        }
+                    }
+
+                    Ok(())
+                },
+            );
+
         Ok(Self {
             inner: geolocator,
-            handler: event_handler,
+            status_handler,
+            position_handler,
             rust_handler,
-            token: None,
+            status_token: None,
+            position_token: None,
         })
     }
 
-    pub fn request_authorization(&self, _access: Access, _accuracy: Accuracy) -> Result<()> {
+    pub fn request_authorization(&self, _access: Access, accuracy: Accuracy) -> Result<()> {
+        // Hint the desired precision (best-effort): `High` for precise, `Default` for approximate.
+        let desired = match accuracy {
+            Accuracy::Precise => PositionAccuracy::High,
+            Accuracy::Approximate => PositionAccuracy::Default,
+        };
+        let _ = self.inner.SetDesiredAccuracy(desired);
         match Geolocator::RequestAccessAsync()?.get()? {
             GeolocationAccessStatus::Allowed => Ok(()),
             GeolocationAccessStatus::Denied => Err(Error::AuthorizationDenied),
@@ -97,8 +126,14 @@ impl Manager {
 
         spawn(move || {
             if let Ok(handler) = handler.lock() {
-                if let Ok(location) = get_location(inner_cloned.as_ref()) {
-                    handler.handle(location)
+                // Cached-first, then refine; error only if nothing was delivered (never hang).
+                let delivered_cached = match get_cached_location(inner_cloned.as_ref()) {
+                    Ok(location) => { handler.handle(location); true }
+                    Err(_) => false,
+                };
+                match get_location(inner_cloned.as_ref()) {
+                    Ok(location) => handler.handle(location),
+                    Err(e) => if !delivered_cached { handler.error(e); }
                 }
             }
         });
@@ -107,13 +142,21 @@ impl Manager {
     }
 
     pub fn start_updates(&mut self) -> Result<()> {
-        let token = self.inner.StatusChanged(&self.handler)?;
-        self.token = Some(token);
+        self.stop_updates()?; // idempotent: drop any earlier registrations first
+
+        // Hint the provider to stream positions (else PositionChanged may fire once); may fail.
+        let _ = self.inner.SetReportInterval(1000);
+
+        self.position_token = Some(self.inner.PositionChanged(&self.position_handler)?);
+        self.status_token = Some(self.inner.StatusChanged(&self.status_handler)?);
         Ok(())
     }
 
     pub fn stop_updates(&mut self) -> Result<()> {
-        if let Some(token) = self.token.take() {
+        if let Some(token) = self.position_token.take() {
+            self.inner.RemovePositionChanged(token)?;
+        }
+        if let Some(token) = self.status_token.take() {
             self.inner.RemoveStatusChanged(token)?;
         }
         Ok(())
@@ -166,10 +209,25 @@ impl Location<'_> {
     }
 }
 
-fn get_location(geolocator: &Geolocator) -> Result<crate::Location> {
+fn get_location(geolocator: &Geolocator) -> Result<crate::Location<'_>> {
     Ok(crate::Location {
         inner: Location {
             inner: geolocator.GetGeopositionAsync()?.get()?.Coordinate()?,
+            _phantom_data: PhantomData,
+        },
+    })
+}
+
+// A recently-cached fix, returned near-instantly (short timeout = don't acquire a new one).
+fn get_cached_location(geolocator: &Geolocator) -> Result<crate::Location<'_>> {
+    let max_age = TimeSpan { Duration: 3600 * 10_000_000 }; // accept a fix up to ~1h old
+    let timeout = TimeSpan { Duration: 1_000_000 };         // 100ms: return cached, don't acquire anew
+    Ok(crate::Location {
+        inner: Location {
+            inner: geolocator
+                .GetGeopositionAsyncWithAgeAndTimeout(max_age, timeout)?
+                .get()?
+                .Coordinate()?,
             _phantom_data: PhantomData,
         },
     })

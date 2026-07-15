@@ -8,7 +8,7 @@ authors = [
     "Klim Tsoutsman <klim@tsoutsman.com>",
     "Project Robius Maintainers",
 ]
-description = "Rust abstractions for multi-platform native authentication: biometrics, fingerprint, password, screen lock, TouchID, FaceID, Windows Hello, etc."
+description = "Rust abstractions for accessing native geo-location (e.g., GPS) across platforms."
 documentation = "https://docs.rs/robius-location"
 homepage.workspace = true
 keywords = ["robius", "location", "coordinate", "geo", "GPS"]
