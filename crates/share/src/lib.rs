@@ -11,6 +11,9 @@
 //!     Android 10 and newer. On older Android versions, text files can be shared
 //!     as text content, but arbitrary binary path attachments require an app
 //!     `ContentProvider`.
+//!   * **Minimum API level: 26 (Android 8.0).** The bundled Java helper is loaded
+//!     via `InMemoryDexClassLoader`, which requires API 26. Set `minSdk` to at
+//!     least 26 in your app.
 //! * **iOS**: sharing uses `UIActivityViewController`, with text, URLs, and
 //!   filesystem path attachments.
 //! * **macOS**: sharing uses `NSSharingServicePicker`, with text, URLs, and

@@ -13,7 +13,11 @@
 //!   * On Android 10 and up, it saves directly to Downloads via `MediaStore.Downloads`.
 //!   * On Android 8 and 9, it writes directly to storage if the legacy external storage
 //!     write permission is granted. Otherwise it falls back to `ACTION_CREATE_DOCUMENT`.
-//! * **iOS**: file picking use [`UIDocumentPickerViewController`], while 
+//!   * **Minimum API level: 26 (Android 8.0).** The bundled Java helper is loaded via
+//!     `InMemoryDexClassLoader`, which requires API 26. Newer features (the system
+//!     Photo Picker, `MediaStore.Downloads`) are used only when the device supports
+//!     them, so set `minSdk` to at least 26 in your app.
+//! * **iOS**: file picking use [`UIDocumentPickerViewController`], while
 //!   media picking uses `PHPickerViewController`.
 //!
 //! On Android, picked files are returned as `content://` URIs (there's no other real option),

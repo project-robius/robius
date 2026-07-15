@@ -9,6 +9,9 @@ Rust abstractions for native file picker dialogs, including dedicated image and 
    * On Android 10 and up, it can save directly to "Downloads" via `MediaStore.Downloads`.
    * On Android 8 an 9, it writes directly to storage when the legacy external storage write permission
      is granted, and otherwise falls back to `ACTION_CREATE_DOCUMENT`.
+   * **Minimum API level: 26 (Android 8.0).** The bundled Java helper is loaded via `InMemoryDexClassLoader`,
+     which requires API 26. Newer features (the system Photo Picker, `MediaStore.Downloads`) are used only
+     when the device supports them, so set `minSdk` to at least 26.
 * iOS: file operations use `UIDocumentPickerViewController`, media picking uses`PHPickerViewController`.
 
 All completion callbacks run on a background thread (a native OS thread, not an async task).
