@@ -33,6 +33,10 @@ attachments are copied to a shareable MediaStore item on Android 10 and newer.
 On Android 8 and 9, API 26 through 28, text files can be shared as text
 content; arbitrary binary path attachments require a host-app `ContentProvider`.
 
+The **minimum supported Android API level is 26 (Android 8.0)**: the bundled Java
+helper is loaded via `InMemoryDexClassLoader`, which requires API 26, so set
+`minSdk` to at least 26 in your app.
+
 ## Android file attachments
 
 Android receivers should be given `content://` URIs, not private app filesystem

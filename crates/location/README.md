@@ -33,4 +33,9 @@ As specified in the [Android documentation][android-docs].
 
 Note that these go in the `manifest` key section, not the `application` section.
 
+### Minimum API level
+The minimum supported Android API level is **26 (Android 8.0)**: the bundled Java helper is loaded via
+`InMemoryDexClassLoader`, which requires API 26. Newer location APIs (e.g. `getCurrentLocation`) are used only
+when the device supports them, with a fallback for older versions, so set `minSdk` to at least 26 in your app.
+
 [android-docs]: https://developer.android.com/develop/sensors-and-location/location/permissions
