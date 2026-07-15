@@ -21,6 +21,13 @@ pub enum Error {
     UserCanceled,
     /// The provided action ID is not in the policy's allowed list.
     InvalidActionId,
+    /// The prompt text is invalid for this platform — e.g. an empty
+    /// [`Text::apple`] reason or an empty [`AndroidText::title`], which the
+    /// platform APIs reject.
+    ///
+    /// [`Text::apple`]: crate::Text::apple
+    /// [`AndroidText::title`]: crate::AndroidText::title
+    InvalidText,
 
     // Apple-specific errors
     /// The app canceled authentication.
@@ -130,6 +137,55 @@ pub enum Error {
 
     /// An unknown error occurred.
     Unknown,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let description = match self {
+            #[cfg(target_os = "android")]
+            Self::Java(e) => return write!(f, "Java error during authentication: {e}"),
+            Self::Authentication => "the user failed to provide valid credentials",
+            Self::Exhausted => "authentication failed due to too many failed attempts",
+            Self::Unavailable => "the requested authentication method was unavailable",
+            Self::UserCanceled => "the user canceled authentication",
+            Self::InvalidActionId => "the provided action ID is not in the policy's allowed list",
+            Self::InvalidText => "the provided prompt text is invalid for the current platform",
+            Self::AppCanceled => "the app canceled authentication",
+            Self::SystemCanceled => "the system canceled authentication",
+            Self::BiometryDisconnected => {
+                "the paired biometric accessory required for authentication is not connected"
+            }
+            Self::NotPaired => "no biometric accessory required for authentication is paired",
+            Self::NotEnrolled => "the user has no enrolled biometric identities",
+            Self::NotInteractive => "displaying the required authentication UI is forbidden",
+            Self::CompanionNotAvailable => {
+                "authentication with a companion device (e.g., Apple Watch) failed"
+            }
+            Self::InvalidDimensions => "the authentication input has invalid dimensions",
+            Self::PasscodeNotSet => "no passcode is set on the device",
+            Self::UserFallback => {
+                "the user chose the fallback authentication method, \
+                 but the policy does not support fallback"
+            }
+            Self::UpdateRequired => "a security update is required before authenticating",
+            Self::Timeout => "authentication timed out",
+            Self::Busy => "the biometric verifier device is busy",
+            Self::DisabledByPolicy => "group policy has disabled the biometric verifier device",
+            Self::NotConfigured => "no biometric verifier device is configured for this user",
+            Self::Unknown => "an unknown authentication error occurred",
+        };
+        f.write_str(description)
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        #[cfg(target_os = "android")]
+        if let Self::Java(e) = self {
+            return Some(&**e);
+        }
+        None
+    }
 }
 
 #[cfg(target_os = "android")]

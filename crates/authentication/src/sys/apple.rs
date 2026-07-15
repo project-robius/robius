@@ -1,5 +1,4 @@
 use block2::RcBlock;
-use objc2::rc::Retained;
 use objc2_foundation::{NSError, NSString};
 use objc2_local_authentication::{LAContext, LAError, LAPolicy};
 // #[cfg(feature = "async")]
@@ -10,15 +9,11 @@ use crate::{BiometricStrength, Error, Result, Text};
 pub(crate) type RawContext = ();
 
 #[derive(Debug)]
-pub(crate) struct Context {
-    inner: Retained<LAContext>,
-}
+pub(crate) struct Context;
 
 impl Context {
     pub(crate) fn new(_: RawContext) -> Self {
-        Self {
-            inner: unsafe { LAContext::new() },
-        }
+        Self
     }
     // TODO: Fix the async authenticate function
     //
@@ -53,11 +48,25 @@ impl Context {
     where
         F: Fn(Result<()>) + Send + 'static
     {
-        unsafe { self.inner.canEvaluatePolicy_error(policy.inner) }.map_err(|err| {
+        // An empty reason makes evaluatePolicy throw NSInvalidArgumentException,
+        // which aborts the app, so bail early.
+        if text.apple.is_empty() {
+            return Err(Error::InvalidText);
+        }
+
+        // An LAContext is single-use: reuse one and a past success lets the next
+        // call skip the prompt. Make a fresh one each time.
+        let context = unsafe { LAContext::new() };
+
+        unsafe { context.canEvaluatePolicy_error(policy.inner) }.map_err(|err| {
             Error::from(LAError(err.code()))
         })?;
 
+        // The eval is async and the context has to stay alive until the reply
+        // fires, so move a strong ref into the block.
+        let context_keepalive = context.clone();
         let block = RcBlock::new(move |is_success, error: *mut NSError| {
+            let _keep_alive = &context_keepalive;
             let arg = bool::from(is_success)
                 .then_some(())
                 .ok_or_else(|| {
@@ -69,11 +78,13 @@ impl Context {
                         Error::from(laerror)
                     }
                 });
-            callback(arg)
+            // This runs on a framework queue, so don't let a panicking callback
+            // unwind across the ObjC frame.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(arg)));
         });
 
         unsafe {
-            self.inner.evaluatePolicy_localizedReason_reply(
+            context.evaluatePolicy_localizedReason_reply(
                 policy.inner,
                 &NSString::from_str(text.apple),
                 &block,
@@ -201,12 +212,13 @@ impl PolicyBuilder {
                 _companion: true,
                 ..
             } => {
-                // This crashes the app on iOS (at least on the simulator).
+                // Companion-only isn't supported on iOS (it crashes), so call it
+                // invalid instead of silently swapping in passcode auth.
                 #[cfg(not(target_os = "ios"))] {
                     LAPolicy::DeviceOwnerAuthenticationWithCompanion
                 }
                 #[cfg(target_os = "ios")] {
-                    LAPolicy::DeviceOwnerAuthentication
+                    return None
                 }
             },
             _ => return None,

@@ -55,45 +55,81 @@ impl Context {
     where
         F: Fn(Result<()>) + Send + 'static,
     {
+        if text.android.title.is_empty() {
+            // Builder.build() throws on an empty title.
+            return Err(Error::InvalidText);
+        }
         robius_android_env::with_activity(|env, context| {
             let callback_class = callback::get_callback_class(env)?;
-            let callback_boxed_dyn = Box::new(callback) as Box<dyn Fn(Result<()>)>;
+            let callback_boxed_dyn = Box::new(callback) as Box<dyn Fn(Result<()>) + Send>;
             let callback_boxed_boxed_ptr = Box::into_raw(Box::new(callback_boxed_dyn));
-            let callback_instance = construct_callback(
-                env,
-                callback_class,
-                callback_boxed_boxed_ptr as i64,
-            )?;
-            let cancellation_signal = construct_cancellation_signal(env)?;
-            let executor = get_executor(env, context)?;
 
-            let biometric_prompt = construct_biometric_prompt(env, context, policy, &text)?;
+            // with_activity attaches the thread permanently, so on a long-lived
+            // native thread the local refs never get freed. Scope them in a local
+            // frame so the ref table doesn't overflow.
+            let result = env.with_local_frame(16, |env| {
+                show_prompt(
+                    env,
+                    context,
+                    callback_class,
+                    callback_boxed_boxed_ptr as i64,
+                    policy,
+                    &text,
+                )
+            });
 
-            env.call_method(
-                biometric_prompt,
-                "authenticate",
-                "(\
-                 Landroid/os/CancellationSignal;\
-                 Ljava/util/concurrent/Executor;\
-                 Landroid/hardware/biometrics/BiometricPrompt$AuthenticationCallback;\
-                 )V",
-                &[
-                    JValueGen::Object(&cancellation_signal),
-                    JValueGen::Object(&executor),
-                    JValueGen::Object(&callback_instance),
-                ],
-            )?;
-
-            Ok(())
+            if result.is_err() {
+                // Prompt never showed, so Java won't invoke or free the callback.
+                // Free it here so it doesn't leak.
+                if env.exception_check().unwrap_or(false) {
+                    let _ = env.exception_clear();
+                }
+                drop(unsafe { Box::from_raw(callback_boxed_boxed_ptr) });
+            }
+            result
         })
-        .map_err(|e| Error::Java(e))?
+        .map_err(Error::from)?
     }
+}
+
+fn show_prompt(
+    env: &mut JNIEnv<'_>,
+    context: &JObject<'_>,
+    callback_class: &GlobalRef,
+    callback_box_ptr: i64,
+    policy: &Policy,
+    text: &Text,
+) -> Result<()> {
+    let callback_instance = construct_callback(env, callback_class, callback_box_ptr)?;
+    let cancellation_signal = construct_cancellation_signal(env)?;
+    let executor = get_executor(env, context)?;
+
+    let biometric_prompt =
+        construct_biometric_prompt(env, context, policy, text, &executor, &callback_instance)?;
+
+    // Once authenticate returns, the framework holds its own ref to the callback,
+    // so our local refs can be dropped.
+    env.call_method(
+        biometric_prompt,
+        "authenticate",
+        "(\
+         Landroid/os/CancellationSignal;\
+         Ljava/util/concurrent/Executor;\
+         Landroid/hardware/biometrics/BiometricPrompt$AuthenticationCallback;\
+         )V",
+        &[
+            JValueGen::Object(&cancellation_signal),
+            JValueGen::Object(&executor),
+            JValueGen::Object(&callback_instance),
+        ],
+    )?;
+
+    Ok(())
 }
 
 #[derive(Debug)]
 pub(crate) struct Policy {
-    #[allow(dead_code)]
-    strength: BiometricStrength,
+    strength: Option<BiometricStrength>,
     password: bool,
 }
 
@@ -139,13 +175,15 @@ impl PolicyBuilder {
     }
 
     pub(crate) const fn build(self) -> Option<Policy> {
-        if let Some(strength) = self.biometrics {
-            return Some(Policy {
-                strength,
-                password: self.password,
-            });
+        // Need at least one method on. Biometrics-only, credential-only (API 29+),
+        // and both are all fine with BiometricPrompt.
+        if self.biometrics.is_none() && !self.password {
+            return None;
         }
-        None
+        Some(Policy {
+            strength: self.biometrics,
+            password: self.password,
+        })
     }
 }
 
@@ -182,13 +220,38 @@ fn construct_biometric_prompt<'a>(
     context: &JObject<'_>,
     policy: &Policy,
     text: &Text,
+    executor: &JObject<'_>,
+    negative_button_listener: &JObject<'_>,
 ) -> Result<JObject<'a>> {
-    let context = env.new_global_ref(context).unwrap();
+    // `BiometricManager.Authenticators` constants.
+    const STRONG: i32 = 0xf;
+    const WEAK: i32 = 0xff;
+    const CREDENTIAL: i32 = 0x8000;
+    // `android.R.string.cancel`, a stable public resource ID.
+    const ANDROID_R_STRING_CANCEL: i32 = 17039360;
+
+    let sdk_int = env
+        .get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?
+        .i()?;
+
+    let biometrics_mask = match policy.strength {
+        Some(BiometricStrength::Strong) => STRONG,
+        Some(BiometricStrength::Weak) => WEAK,
+        None => 0,
+    };
+    // Device credential (PIN/pattern/password) fallback needs API 29+
+    // (setDeviceCredentialAllowed) or API 30+ (setAllowedAuthenticators).
+    let credential_allowed = policy.password && sdk_int >= 29;
+
+    if biometrics_mask == 0 && !credential_allowed {
+        // Credential-only doesn't work before API 29.
+        return Err(Error::Unavailable);
+    }
 
     let builder = env.new_object(
         "android/hardware/biometrics/BiometricPrompt$Builder",
         "(Landroid/content/Context;)V",
-        &[JValueGen::Object(context.as_ref())],
+        &[JValueGen::Object(context)],
     )?;
 
     env.call_method(
@@ -216,21 +279,52 @@ fn construct_biometric_prompt<'a>(
             &[JValueGen::Object(&env.new_string(description)?.into())],
         )?;
     }
-    const STRONG: i32 = 0xf;
-    const WEAK: i32 = 0xff;
-    const CREDENTIAL: i32 = 0x8000;
 
-    env.call_method(
-        &builder,
-        "setAllowedAuthenticators",
-        "(I)Landroid/hardware/biometrics/BiometricPrompt$Builder;",
-        &[JValueGen::Int(
-            match policy.strength {
-                BiometricStrength::Strong => STRONG,
-                BiometricStrength::Weak => WEAK,
-            } | if policy.password { CREDENTIAL } else { 0 },
-        )],
-    )?;
+    if sdk_int >= 30 {
+        env.call_method(
+            &builder,
+            "setAllowedAuthenticators",
+            "(I)Landroid/hardware/biometrics/BiometricPrompt$Builder;",
+            &[JValueGen::Int(
+                biometrics_mask | if credential_allowed { CREDENTIAL } else { 0 },
+            )],
+        )?;
+    } else if credential_allowed {
+        // API 29: `setAllowedAuthenticators` doesn't exist yet.
+        env.call_method(
+            &builder,
+            "setDeviceCredentialAllowed",
+            "(Z)Landroid/hardware/biometrics/BiometricPrompt$Builder;",
+            &[JValueGen::Bool(1)],
+        )?;
+    }
+
+    if !credential_allowed {
+        // Framework wants a negative button when there's no credential fallback;
+        // build() throws otherwise.
+        let cancel_text = env
+            .call_method(
+                context,
+                "getString",
+                "(I)Ljava/lang/String;",
+                &[JValueGen::Int(ANDROID_R_STRING_CANCEL)],
+            )?
+            .l()?;
+        env.call_method(
+            &builder,
+            "setNegativeButton",
+            "(\
+             Ljava/lang/CharSequence;\
+             Ljava/util/concurrent/Executor;\
+             Landroid/content/DialogInterface$OnClickListener;\
+             )Landroid/hardware/biometrics/BiometricPrompt$Builder;",
+            &[
+                JValueGen::Object(&cancel_text),
+                JValueGen::Object(executor),
+                JValueGen::Object(negative_button_listener),
+            ],
+        )?;
+    }
 
     env.call_method(
         builder,

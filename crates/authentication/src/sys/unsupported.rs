@@ -21,8 +21,11 @@ impl Context {
     //     Err(Error::Unknown)
     // }
 
-    pub(crate) fn authenticate(&self, _: Text, _: &Policy) -> Result<()> {
-        Err(Error::Unknown)
+    pub(crate) fn authenticate<F>(&self, _: Text, _: &Policy, _: F) -> Result<()>
+    where
+        F: Fn(Result<()>) + Send + 'static,
+    {
+        Err(Error::Unavailable)
     }
 }
 

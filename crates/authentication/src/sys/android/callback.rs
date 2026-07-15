@@ -13,20 +13,22 @@ const AUTHENTICATION_CALLBACK_BYTECODE: &[u8] =
 
 
 // NOTE: This must be kept in sync with the signature of `rust_callback`.
-const RUST_CALLBACK_SIGNATURE: &str = "(JII)V";
+const RUST_CALLBACK_SIGNATURE: &str = "(JI)V";
 
 // NOTE: The signature of this function must be kept in sync with
 // `RUST_CALLBACK_SIGNATURE`.
+//
+// Java's `invokeOnce` calls this at most once per pointer, so the
+// `Box::from_raw` below is sound.
 unsafe extern "C" fn rust_callback<'a>(
     _: JNIEnv<'a>,
     _: JObject<'a>,
     callback_ptr_ptr: jlong,
     error_code: jint,
-    help_code: jint,
 ) {
     // When we constructed the callback, we double-boxed it.
     let callback_ptr_boxed = unsafe {
-        Box::from_raw(callback_ptr_ptr as *mut Box<dyn Fn(Result<()>)>)
+        Box::from_raw(callback_ptr_ptr as *mut Box<dyn Fn(Result<()>) + Send>)
     };
     let callback = *callback_ptr_boxed;
 
@@ -39,6 +41,7 @@ unsafe extern "C" fn rust_callback<'a>(
             BIOMETRIC_ERROR_LOCKOUT => Error::Exhausted,
             // TODO: Differentiate between lockout and lockout permanent?
             BIOMETRIC_ERROR_LOCKOUT_PERMANENT => Error::Exhausted,
+            BIOMETRIC_ERROR_NEGATIVE_BUTTON => Error::UserCanceled,
             BIOMETRIC_ERROR_NO_BIOMETRICS => Error::Unavailable,
             BIOMETRIC_ERROR_NO_DEVICE_CREDENTIAL => Error::Unavailable,
             BIOMETRIC_ERROR_NO_SPACE => Error::Unknown,
@@ -50,13 +53,11 @@ unsafe extern "C" fn rust_callback<'a>(
             BIOMETRIC_NO_AUTHENTICATION => Error::Unavailable,
             _ => Error::Unknown,
         })
-    } else if help_code != 0 {
-        // TODO: consider returning a specific retry-able error here.
-        Err(Error::Unknown)
     } else {
         Ok(())
     };
-    callback(result);
+    // Don't let a panicking callback unwind into the JVM.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(result)));
 }
 
 static CALLBACK_CLASS: OnceLock<GlobalRef> = OnceLock::new();
@@ -125,6 +126,7 @@ const BIOMETRIC_ERROR_HW_NOT_PRESENT: i32 = 0xc;
 const BIOMETRIC_ERROR_HW_UNAVAILABLE: i32 = 1;
 const BIOMETRIC_ERROR_LOCKOUT: i32 = 7;
 const BIOMETRIC_ERROR_LOCKOUT_PERMANENT: i32 = 9;
+const BIOMETRIC_ERROR_NEGATIVE_BUTTON: i32 = 0xd;
 const BIOMETRIC_ERROR_NO_BIOMETRICS: i32 = 0xb;
 const BIOMETRIC_ERROR_NO_DEVICE_CREDENTIAL: i32 = 0xe;
 const BIOMETRIC_ERROR_NO_SPACE: i32 = 4;
