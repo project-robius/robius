@@ -2,32 +2,47 @@
 
 package robius.authentication;
 
+import android.content.DialogInterface;
 import android.hardware.biometrics.BiometricPrompt;
 
-public class AuthenticationCallback extends BiometricPrompt.AuthenticationCallback {
+public class AuthenticationCallback extends BiometricPrompt.AuthenticationCallback
+    implements DialogInterface.OnClickListener {
   private long pointer;
 
-  /* TODO: There are neater ways of doing this */
-  private native void rustCallback(long pointer, int errorCode, int helpCode);
+  private native void rustCallback(long pointer, int errorCode);
 
   public AuthenticationCallback(long pointer) {
     this.pointer = pointer;
   }
 
-  public void onAuthenticationError(int errorCode, CharSequence errString) {
-    rustCallback(pointer, errorCode, 0);
+  /* Invokes the Rust callback at most once; the Rust side frees `pointer` when invoked,
+   * so calling it a second time would be a use-after-free. */
+  private synchronized void invokeOnce(int errorCode) {
+    if (pointer != 0) {
+      rustCallback(pointer, errorCode);
+      pointer = 0;
+    }
   }
 
-  /* This is called when the user presents an incorrect authenticator (e.g. fingerprint or password). However, the
-   * prompt remains displayed and so we don't really care, until the prompt dissapears, in which case
-   * `onAuthenticationError`, `onAuthenticationHelp`, or `onAuthenticationSucceeded` is called. */
+  public void onAuthenticationError(int errorCode, CharSequence errString) {
+    invokeOnce(errorCode);
+  }
+
+  /* Called when the user presents an invalid credential (e.g., an unrecognized fingerprint).
+   * Non-terminal: the prompt remains displayed and the user may retry. */
   public void onAuthenticationFailed() {}
 
-  public void onAuthenticationHelp(int helpCode, CharSequence helpString) {
-    rustCallback(pointer, 0, helpCode);
-  }
+  /* Called with transient feedback during authentication (e.g., "Sensor dirty").
+   * Non-terminal: the prompt remains displayed, so this must not consume the Rust callback. */
+  public void onAuthenticationHelp(int helpCode, CharSequence helpString) {}
 
   public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
-    rustCallback(pointer, 0, 0);
+    invokeOnce(0);
+  }
+
+  /* Handles a click on the prompt's negative button (set when device credential
+   * fallback is not allowed). */
+  public void onClick(DialogInterface dialog, int which) {
+    invokeOnce(BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED);
   }
 }

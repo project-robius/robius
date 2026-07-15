@@ -4,8 +4,10 @@
 //! - Apple: TouchID, FaceID, and regular username/password on macOS and iOS.
 //! - Android: See below for additional steps.
 //!   - Requires the `USE_BIOMETRIC` permission in your app's manifest.
-//! - Windows: Windows Hello (face recognition, fingerprint, PIN), plus
-//!   winrt-based fallback for username/password.
+//!   - Requires API level 28 (Android 9) for biometrics, or API level 29
+//!     (Android 10) if you use the password / device-credential fallback.
+//! - Windows: Windows Hello (face recognition, fingerprint, PIN) via WinRT, plus
+//!   a Win32 credential-UI fallback for username/password.
 //! - Linux: [`polkit`]-based authentication using the desktop environment's
 //!   prompt.
 //!   - **Note: Linux support is currently incomplete.**
@@ -21,6 +23,8 @@
 //!     .biometrics(Some(BiometricStrength::Strong))
 //!     .password(true)
 //!     .companion(true)
+//!     // Required on Linux (polkit action IDs); a no-op on other platforms.
+//!     .action_ids(["org.robius.authentication"])
 //!     .build()
 //!     .unwrap();
 //!
@@ -43,13 +47,11 @@
 //!
 //! Context::new(())
 //!     .authenticate(text, &policy, callback)
-//!     .expect("authentication failed");
+//!     .expect("failed to display the authentication prompt");
 //! ```
 //!
 //! The `Text` struct can also be constructed at compile-time to avoid run-time unwraps:
 //! ```
-//! #![feature(const_option)]
-//!
 //! use robius_authentication::{AndroidText, Text, WindowsText};
 //!
 //! const TEXT: Text = Text {
@@ -59,7 +61,10 @@
 //!         description: None,
 //!     },
 //!     apple: "authenticate",
-//!     windows: WindowsText::new("Title", "Description").unwrap(),
+//!     windows: match WindowsText::new("Title", "Description") {
+//!         Some(text) => text,
+//!         None => panic!("Windows text too long"),
+//!     },
 //! };
 //! ```
 //!
@@ -73,6 +78,14 @@
 //! ```xml
 //! <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 //! ```
+//!
+//! ### Minimum API level
+//!
+//! This crate uses `android.hardware.biometrics.BiometricPrompt`, so the minimum
+//! supported API level is 28 (Android 9). The password / device-credential
+//! fallback needs API level 29 (Android 10); requesting a credential-only policy
+//! on a lower level returns [`Error::Unavailable`]. Set `minSdk` accordingly in
+//! your app.
 //!
 //! [`polkit`]: https://www.freedesktop.org/software/polkit/docs/latest/polkit.8.html
 
@@ -124,13 +137,16 @@ impl Context {
     ///
     /// Note that the returned `Result` does not indicate whether
     /// authentication was successful. This function returns `Ok(())`
-    /// to indicate that the authentication prompt was successfully displayed,
-    /// not that the user successfully authenticated.
+    /// to indicate that the authentication request was successfully initiated
+    /// (i.e., the prompt was or will be shown), not that the user successfully
+    /// authenticated. On some platforms (Android, Linux, Windows) the prompt is
+    /// shown asynchronously after this function has already returned.
     ///
     /// For that purpose, the given `callback` will be called
     /// with a Result indicating whether authentication succeeded.
-    /// Note that the callback may be not be called at all,
-    /// but will always be called upon success.
+    /// If this function returns an error, the callback may never be invoked;
+    /// if it returns `Ok(())`, the callback will eventually be invoked
+    /// with the result of the authentication attempt.
     ///
     /// On Linux: `message` is unused because polkit looks up the prompt text from the
     /// action definition in the installed `.policy` file (its `<message>`/`<description>`).
@@ -278,10 +294,7 @@ impl PolicyBuilder {
     #[must_use]
     pub fn build(self) -> Option<Policy> {
         Some(Policy {
-            inner: match self.inner.build() {
-                Some(inner) => inner,
-                None => return None,
-            },
+            inner: self.inner.build()?,
         })
     }
 }

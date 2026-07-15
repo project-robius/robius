@@ -9,6 +9,10 @@ use windows::{
     Security::Credentials::UI::{
         UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
     },
+    Win32::{
+        Foundation::RPC_E_CHANGED_MODE,
+        System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
+    },
 };
 
 use crate::{text::WindowsText, BiometricStrength, Error, Result, Text};
@@ -51,18 +55,64 @@ impl Context {
     where
         F: Fn(Result<()>) + Send + 'static,
     {
-        // NOTE: If we don't check availability, `request_verification` will hang.
-        let available =
-            check_availability()?.get() == Ok(UserConsentVerifierAvailability::Available);
-
-        let result = if available {
-            let verification = request_verification(message.windows)?;
-            convert(verification.get()?)
-        } else {
-            fallback::authenticate(message.windows)
-        };
-        callback(result);
+        // WindowsText borrows from the caller, so copy the strings for the thread.
+        let title = message.windows.title.to_owned();
+        let description = message.windows.description.to_owned();
+        // The availability check and the prompts all block until the user answers,
+        // so run them off the caller thread and don't freeze the UI.
+        std::thread::Builder::new()
+            .name("robius-authentication".into())
+            .spawn(move || {
+                let text = WindowsText {
+                    title: &title,
+                    description: &description,
+                };
+                // New thread has no COM apartment, and blocking on
+                // IAsyncOperation::get() needs an MTA, so set one up for it.
+                let com = ComGuard::new_multithreaded();
+                callback(authenticate_blocking(text));
+                drop(com);
+            })
+            .map_err(|_| Error::Unavailable)?;
         Ok(())
+    }
+}
+
+/// Sets up a COM multithreaded apartment for this thread and uninitializes it
+/// on drop, unless the thread was already in a different apartment.
+struct ComGuard {
+    should_uninit: bool,
+}
+
+impl ComGuard {
+    fn new_multithreaded() -> Self {
+        let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        // S_OK/S_FALSE mean we init'd and owe a CoUninitialize. RPC_E_CHANGED_MODE
+        // means the thread's already in another apartment, so leave it alone.
+        Self {
+            should_uninit: hr != RPC_E_CHANGED_MODE,
+        }
+    }
+}
+
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        if self.should_uninit {
+            unsafe { CoUninitialize() };
+        }
+    }
+}
+
+fn authenticate_blocking(text: WindowsText<'_, '_>) -> Result<()> {
+    // NOTE: If we don't check availability, `request_verification` will hang.
+    let available =
+        check_availability()?.get() == Ok(UserConsentVerifierAvailability::Available);
+
+    if available {
+        let verification = request_verification(text)?;
+        convert(verification.get()?)
+    } else {
+        fallback::authenticate(text)
     }
 }
 
@@ -78,28 +128,27 @@ impl Policy {
 
 #[derive(Debug)]
 pub(crate) struct PolicyBuilder {
-    valid: bool,
+    biometrics: bool,
+    password: bool,
 }
 
 impl PolicyBuilder {
     pub(crate) const fn new() -> Self {
-        Self { valid: true }
+        Self {
+            biometrics: true,
+            password: true,
+        }
     }
 
     pub(crate) const fn biometrics(self, biometrics: Option<BiometricStrength>) -> Self {
-        if biometrics.is_none() {
-            Self { valid: false }
-        } else {
-            self
+        Self {
+            biometrics: biometrics.is_some(),
+            ..self
         }
     }
 
     pub(crate) const fn password(self, password: bool) -> Self {
-        if password {
-            self
-        } else {
-            Self { valid: false }
-        }
+        Self { password, ..self }
     }
 
     pub(crate) const fn companion(self, _: bool) -> Self {
@@ -115,7 +164,9 @@ impl PolicyBuilder {
     }
 
     pub(crate) const fn build(self) -> Option<Policy> {
-        if self.valid {
+        // Windows Hello always allows PIN and the fallback is password-based, so
+        // we can't honor a policy that turns either one off.
+        if self.biometrics && self.password {
             Some(Policy)
         } else {
             None
@@ -131,9 +182,7 @@ fn check_availability() -> Result<IAsyncOperation<UserConsentVerifierAvailabilit
 fn request_verification(
     text: WindowsText,
 ) -> Result<IAsyncOperation<UserConsentVerificationResult>> {
-    let caption = caption(text.description);
-
-    UserConsentVerifier::RequestVerificationAsync(&HSTRING::from_wide(&caption[..])?)
+    UserConsentVerifier::RequestVerificationAsync(&HSTRING::from(text.description))
         .map_err(|e| e.into())
 }
 
@@ -209,7 +258,6 @@ fn request_verification(
     }
 
     let window = unsafe { GetDesktopWindow() };
-    let caption = caption(text.description);
 
     let factory = factory::<UserConsentVerifier, IUserConsentVerifierInterop>()?;
 
@@ -217,32 +265,25 @@ fn request_verification(
         IUserConsentVerifierInterop::RequestVerificationForWindowAsync(
             &factory,
             window,
-            &HSTRING::from_wide(&caption[..])?,
+            // NOTE: HSTRING is length-prefixed, so no null terminator; `from`
+            // does the UTF-16 conversion.
+            &HSTRING::from(text.description),
         )
     }?;
 
-    focus_security_prompt()?;
+    // Focusing is just a nice-to-have and the prompt's already up, so don't fail
+    // auth if it doesn't work.
+    let _ = focus_security_prompt();
 
     Ok(op)
-}
-
-fn caption(message: &str) -> Vec<u16> {
-    let mut caption = Vec::with_capacity(message.len());
-
-    for c in message.encode_utf16() {
-        caption.push(c);
-    }
-    caption.push(0);
-
-    caption
 }
 
 fn convert(result: UserConsentVerificationResult) -> Result<()> {
     match result {
         UserConsentVerificationResult::Verified => Ok(()),
         UserConsentVerificationResult::DeviceNotPresent => Err(Error::Unavailable),
-        UserConsentVerificationResult::NotConfiguredForUser => Err(Error::Unavailable),
-        UserConsentVerificationResult::DisabledByPolicy => Err(Error::Unavailable),
+        UserConsentVerificationResult::NotConfiguredForUser => Err(Error::NotConfigured),
+        UserConsentVerificationResult::DisabledByPolicy => Err(Error::DisabledByPolicy),
         UserConsentVerificationResult::DeviceBusy => Err(Error::Busy),
         UserConsentVerificationResult::RetriesExhausted => Err(Error::Exhausted),
         UserConsentVerificationResult::Canceled => Err(Error::UserCanceled),

@@ -6,6 +6,9 @@ fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
 
     if target_os == "android" {
+        // android-build already emits rerun-if-env-changed for the SDK/JDK env
+        // vars it reads (ANDROID_HOME, ANDROID_PLATFORM, JAVA_HOME, etc.), so we
+        // only track the Java source here.
         println!("cargo:rerun-if-changed={JAVA_FILE_RELATIVE_PATH}");
 
         let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());

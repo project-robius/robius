@@ -48,8 +48,10 @@ impl<'a, 'b> WindowsText<'a, 'b> {
 
     /// Creates a new `WindowsText` instance.
     ///
-    /// Returns `None` if `title` exceeds 128 bytes in length
-    /// or if `description` exceeds 1024 bytes in length.
+    /// On Windows, returns `None` if `title` exceeds 128 bytes in length
+    /// or if `description` exceeds 1024 bytes in length. On other targets the
+    /// text is unused, so no validation is performed and this always returns
+    /// `Some`.
     #[cfg(not(target_os = "windows"))]
     pub const fn new(title: &'a str, description: &'b str) -> Option<Self> {
         Some(Self { title, description })
@@ -57,28 +59,45 @@ impl<'a, 'b> WindowsText<'a, 'b> {
 
     /// Creates a new `WindowsText` instance.
     ///
-    /// The `title` ("caption") will be truncated to 128 bytes in length,
-    /// and the `description` ("message") will be truncated to 1024 bytes in length.
+    /// The `title` ("caption") will be truncated to at most 128 bytes in length,
+    /// and the `description` ("message") will be truncated to at most 1024 bytes in length.
+    /// Truncation respects UTF-8 character boundaries, so fewer bytes may be kept.
     #[cfg(target_os = "windows")]
     pub fn new_truncated(title: &'a str, description: &'b str) -> Self {
         use windows::Win32::Security::Credentials::{
             CREDUI_MAX_CAPTION_LENGTH, CREDUI_MAX_MESSAGE_LENGTH,
         };
 
-        let title_max_len = std::cmp::min(CREDUI_MAX_CAPTION_LENGTH as usize, title.len());
-        let description_max_len = std::cmp::min(CREDUI_MAX_MESSAGE_LENGTH as usize, description.len());
         Self {
-            title: &title[..title_max_len],
-            description: &description[..description_max_len],
+            title: truncate_to_char_boundary(title, CREDUI_MAX_CAPTION_LENGTH as usize),
+            description: truncate_to_char_boundary(
+                description,
+                CREDUI_MAX_MESSAGE_LENGTH as usize,
+            ),
         }
     }
 
     /// Creates a new `WindowsText` instance.
     ///
-    /// The `title` ("caption") will be truncated to 128 bytes in length,
-    /// and the `description` ("message") will be truncated to 1024 bytes in length.
+    /// On Windows, the `title` ("caption") is truncated to at most 128 bytes and
+    /// the `description` ("message") to at most 1024 bytes, respecting UTF-8
+    /// character boundaries. On other targets the text is unused and is stored
+    /// verbatim without truncation.
     #[cfg(not(target_os = "windows"))]
     pub fn new_truncated(title: &'a str, description: &'b str) -> Self {
         Self { title, description }
     }
+}
+
+/// Truncates `s` to at most `max_len` bytes without splitting a UTF-8 character.
+#[cfg(target_os = "windows")]
+fn truncate_to_char_boundary(s: &str, max_len: usize) -> &str {
+    if s.len() <= max_len {
+        return s;
+    }
+    let mut end = max_len;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }

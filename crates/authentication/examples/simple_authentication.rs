@@ -43,7 +43,10 @@ const TEXT: Text = Text {
         description: None,
     },
     apple: "authenticate",
-    windows: WindowsText::new("Title", "Description").unwrap(),
+    windows: match WindowsText::new("Title", "Description") {
+        Some(text) => text,
+        None => panic!("Windows text too long"),
+    },
 };
 
 fn main() {

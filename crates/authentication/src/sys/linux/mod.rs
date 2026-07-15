@@ -78,14 +78,26 @@ fn do_polkit_check(action_id: &str) -> Result<()> {
                     "org.freedesktop.PolicyKit1.Error.NotAuthorized" => Error::Authentication,
                     "org.freedesktop.PolicyKit1.Error.NotSupported" => Error::Unavailable,
                     "org.freedesktop.PolicyKit1.Error.NoAgent" => Error::Unavailable,
-                    _ => Error::Authentication,
+                    // Fires for an unregistered action or rejected details, before
+                    // any prompt — we couldn't evaluate it, the user didn't fail.
+                    "org.freedesktop.PolicyKit1.Error.Failed" => Error::Unavailable,
+                    // D-Bus transport errors show up here (not as FDO) since the
+                    // polkit proxy returns a plain zbus::Result.
+                    "org.freedesktop.DBus.Error.NoReply"
+                    | "org.freedesktop.DBus.Error.Timeout"
+                    | "org.freedesktop.DBus.Error.TimedOut"
+                    | "org.freedesktop.DBus.Error.ServiceUnknown"
+                    | "org.freedesktop.DBus.Error.NameHasNoOwner"
+                    | "org.freedesktop.DBus.Error.NoServer"
+                    | "org.freedesktop.DBus.Error.Disconnected" => Error::Unavailable,
+                    _ => Error::Unknown,
                 },
                 ZbusError::FDO(fdo_err) => match *fdo_err {
                     fdo::Error::TimedOut(_) | fdo::Error::NoReply(_) => Error::Unavailable,
-                    _ => Error::Authentication,
+                    _ => Error::Unknown,
                 },
                 ZbusError::InputOutput(_) => Error::Unavailable,
-                _ => Error::Authentication,
+                _ => Error::Unknown,
             }
         })?;
 
@@ -102,9 +114,13 @@ fn do_polkit_check(action_id: &str) -> Result<()> {
         return Err(Error::UserCanceled);
     }
 
+    // is_challenge means polkit wanted to prompt but never got an answer —
+    // usually no agent is running. That's unavailable, not a failed login.
+    if result.is_challenge {
+        return Err(Error::Unavailable);
+    }
 
-    // If we're not authorized, treat as authentication failure.
-    // "NoAgent" is handled as an error (org.freedesktop.PolicyKit1.Error.NoAgent).
+    // Otherwise the action is just denied for this subject.
     Err(Error::Authentication)
 }
 

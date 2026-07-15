@@ -11,6 +11,7 @@ This crate supports:
   * Requires the `NSFaceIDUsageDescription` key in your app's `Info.plist` file.
 * Android: Biometric prompt and regular screen lock. See below for additional steps.
   * Requires the `USE_BIOMETRIC` permission in your app's manifest.
+  * Requires API level 28 (Android 9) for biometrics, or API level 29 (Android 10) for the password / device-credential fallback.
 * Windows: Windows Hello (face recognition, fingerprint, PIN),
 plus winrt-based fallback for username/password.
 * Linux: [`polkit`]-based authentication using the desktop environment's prompt.
@@ -29,6 +30,11 @@ To use this crate on Android, you must add the following to your app's `AndroidM
 ```xml
 <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 ```
+
+### Minimum API level
+This crate uses `android.hardware.biometrics.BiometricPrompt`, so the minimum supported API level is **28 (Android 9)**.
+The password / device-credential fallback requires API level **29 (Android 10)**; requesting a credential-only policy on a lower
+level returns `Error::Unavailable`. Set `minSdk` accordingly in your app.
 
 ## Usage on Linux
 
