@@ -8,6 +8,7 @@ use objc2_core_location::{
     kCLLocationAccuracyBest, kCLLocationAccuracyKilometer, CLAuthorizationStatus, CLLocation,
     CLLocationCoordinate2D, CLLocationManager, CLLocationManagerDelegate,
 };
+use objc2_foundation::{NSBundle, NSString};
 
 use crate::{Access, Accuracy, Coordinates, Handler, Result};
 
@@ -51,27 +52,32 @@ impl Manager {
     }
 
     pub(crate) fn update_once(&self) -> Result<()> {
-        // `requestLocation` fails (rather than waiting) if called before authorization is granted,
-        // so while the status is undetermined we defer it until `didChangeAuthorization` fires.
-        match unsafe { self.inner.authorizationStatus() } {
-            CLAuthorizationStatus::NotDetermined => self.delegate.defer_update_once(),
-            _ => {
-                self.delegate.begin_one_shot(&self.inner); // deliver the cached fix first, then refine
-                unsafe { self.inner.requestLocation() };
-            }
+        // `requestLocation` won't wait if called before authorization, so while it's undetermined we
+        // defer — but only if we can actually prompt; otherwise let `requestLocation` fail now.
+        if self.undetermined() && can_request_location_authorization() {
+            self.delegate.defer_update_once();
+        } else {
+            self.delegate.begin_one_shot(&self.inner); // deliver the cached fix first, then refine
+            unsafe { self.inner.requestLocation() };
         }
         Ok(())
     }
 
     pub(crate) fn start_updates(&self) -> Result<()> {
-        match unsafe { self.inner.authorizationStatus() } {
-            CLAuthorizationStatus::NotDetermined => self.delegate.defer_start_updates(),
-            _ => {
-                self.delegate.begin_continuous();
-                unsafe { self.inner.startUpdatingLocation() };
-            }
+        if self.undetermined() && can_request_location_authorization() {
+            self.delegate.defer_start_updates();
+        } else {
+            self.delegate.begin_continuous();
+            unsafe { self.inner.startUpdatingLocation() };
         }
         Ok(())
+    }
+
+    fn undetermined(&self) -> bool {
+        matches!(
+            unsafe { self.inner.authorizationStatus() },
+            CLAuthorizationStatus::NotDetermined
+        )
     }
 
     pub(crate) fn stop_updates(&self) -> Result<()> {
@@ -79,6 +85,19 @@ impl Manager {
         unsafe { self.inner.stopUpdatingLocation(); }
         Ok(())
     }
+}
+
+// Can we actually prompt for location? Only if the app has a usage-description key in its Info.plist.
+// A binary run directly (not in a .app) has none, so it can never get authorized.
+fn can_request_location_authorization() -> bool {
+    let bundle = NSBundle::mainBundle();
+    [
+        "NSLocationWhenInUseUsageDescription",
+        "NSLocationAlwaysAndWhenInUseUsageDescription",
+        "NSLocationAlwaysUsageDescription",
+    ]
+    .iter()
+    .any(|key| bundle.objectForInfoDictionaryKey(&NSString::from_str(key)).is_some())
 }
 
 pub(crate) struct Location<'a> {
@@ -113,5 +132,15 @@ impl Location<'_> {
     pub(crate) fn time(&self) -> Result<SystemTime> {
         let secs = unsafe { self.inner.timestamp().timeIntervalSince1970() };
         Ok(SystemTime::UNIX_EPOCH + Duration::from_secs_f64(secs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // A `cargo test` binary is unpackaged (no Info.plist usage description), like running the app
+    // directly — so it must report that it can't prompt, so we error instead of deferring forever.
+    #[test]
+    fn unpackaged_binary_cannot_request_location() {
+        assert!(!super::can_request_location_authorization());
     }
 }
