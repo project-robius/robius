@@ -27,7 +27,7 @@ pub use crate::error::{Error, Result};
 ///
 /// **All location manager functions must be called from the main thread**.
 ///
-/// As soon as the handler is registered, it may receive updates immediatly,
+/// As soon as the handler is registered, it may receive updates immediately,
 /// even if `update_once` or `start_updates` are not called.
 /// When the manager is dropped, the handler is no longer guaranteed to receive updates.
 pub struct Manager {
@@ -49,12 +49,14 @@ impl Manager {
 
     /// Requests authorization to access location data.
     ///
-    /// This will return immediately and request authorization in the background.
+    /// iOS/Android: returns immediately; a request made before authorization is deferred until the
+    /// user responds, and a denial goes to [`Handler::error`]. Windows: blocks and returns the result.
     pub fn request_authorization(&self, access: Access, accuracy: Accuracy) -> Result<()> {
         self.inner.request_authorization(access, accuracy)
     }
 
-    /// Delivers a single update to the handler.
+    /// Requests the device's current location, delivered to the handler. May deliver a cached fix
+    /// immediately, then a fresher one once acquired.
     pub fn update_once(&self) -> Result<()> {
         self.inner.update_once()
     }
