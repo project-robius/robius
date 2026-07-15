@@ -41,7 +41,7 @@ robius-android-env.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = [ "NSEnumerator" ] }
+objc2-foundation = { workspace = true, features = [ "NSBundle", "NSEnumerator" ] }
 objc2-core-location = { workspace = true, features = [
     "CLError",
     "CLLocation",
