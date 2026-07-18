@@ -715,6 +715,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-intents"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80fac082e6de12282b24ea745e9707cd374363c7ae0b2f813bf1813cfc289325"
+dependencies = [
+ "block2",
+ "objc2",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-local-authentication"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -756,6 +767,18 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7902ac02859fc1f7045f8b598c63f1ae0cc7efeaa06a9bc9f3d9a3c955974fa4"
 dependencies = [
+ "objc2",
+ "objc2-foundation",
+]
+
+[[package]]
+name = "objc2-user-notifications"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
+dependencies = [
+ "bitflags",
+ "block2",
  "objc2",
  "objc2-foundation",
 ]
@@ -1046,6 +1069,26 @@ dependencies = [
  "robius-android-env",
  "tokio",
  "windows",
+]
+
+[[package]]
+name = "robius-notifications"
+version = "0.3.0"
+dependencies = [
+ "android-build",
+ "block2",
+ "cfg-if",
+ "dispatch2",
+ "jni",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-intents",
+ "objc2-ui-kit",
+ "objc2-user-notifications",
+ "robius-android-env",
+ "windows",
+ "zbus",
 ]
 
 [[package]]

@@ -1,0 +1,123 @@
+[package]
+name = "robius-notifications"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.77.0"
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for showing system notifications and handling user interactions with them, across multiple platforms"
+documentation = "https://docs.rs/robius-notifications"
+homepage.workspace = true
+keywords = ["robius", "notification", "native", "alert", "banner"]
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+
+## Note: ideally this would be only included when we're building for Android,
+## but Cargo doesn't support target-specific build scripts yet.
+## See: <https://github.com/rust-lang/cargo/issues/4932> and
+## <https://github.com/rust-lang/cargo/issues/14378#issuecomment-2278333431>.
+[build-dependencies]
+android-build.workspace = true
+
+
+[features]
+## Enables Apple communication notifications for conversation-style notifications,
+## where it shows sender/group avatars, Siri & Focus intents, etc. on iOS 15+/macOS 12+.
+##
+## Requires your app to do the following:
+## * Declare the `com.apple.developer.usernotifications.communication` entitlement,
+## * In its Info.plist, include `INSendMessageIntent` in the `NSUserActivityTypes` array.
+##
+## If you don't specify that, they'll just show up as normal notifications.
+apple-communication = ["dep:objc2-intents", "objc2-foundation/NSData"]
+
+
+[dependencies]
+cfg-if.workspace = true
+
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+robius-android-env.workspace = true
+
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+block2.workspace = true
+objc2.workspace = true
+objc2-intents = { workspace = true, optional = true, features = [
+    "INImage",
+    "INIntent",
+    "INIntentResponse",
+    "INInteraction",
+    "INOutgoingMessageType",
+    "INPerson",
+    "INPersonHandle",
+    "INSendMessageAttachment",
+    "INSendMessageIntent",
+    "INSpeakableString",
+    "block2",
+] }
+objc2-foundation = { workspace = true, features = [
+    "NSArray",
+    "NSBundle",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSError",
+    "NSObject",
+    "NSSet",
+    "NSString",
+    "NSURL",
+    "NSValue",
+] }
+objc2-user-notifications = { workspace = true, features = [
+    "UNError",
+    "UNNotification",
+    "UNNotificationAction",
+    "UNNotificationAttachment",
+    "UNNotificationCategory",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSettings",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+    "block2",
+] }
+
+
+[target.'cfg(target_os = "ios")'.dependencies]
+dispatch2 = { workspace = true, features = ["objc2"] }
+objc2-ui-kit = { workspace = true, features = [
+    "UIApplication",
+    "UIResponder",
+    "block2",
+] }
+
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { workspace = true, features = [
+    "NSWorkspace",
+] }
+
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus.workspace = true
+
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Data_Xml_Dom",
+    "Foundation",
+    "Foundation_Collections",
+    "System",
+    "UI_Notifications",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
