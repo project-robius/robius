@@ -188,6 +188,18 @@ pub(crate) fn notification_settings(_scope: SettingsScope, callback: SettingsCal
     Ok(())
 }
 
+pub(crate) fn set_app_badge(count: u32) -> Result<()> {
+    ensure_app_bundle()?;
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    // setBadgeCount: only exists on iOS 16+/macOS 13+; on older systems the
+    // badge just keeps following the last-delivered notification's count.
+    if !center.respondsToSelector(sel!(setBadgeCount:withCompletionHandler:)) {
+        return Ok(());
+    }
+    center.setBadgeCount_withCompletionHandler(count as objc2_foundation::NSInteger, None);
+    Ok(())
+}
+
 pub(crate) fn active_notification_ids(callback: ActiveIdsCallback) -> Result<()> {
     ensure_app_bundle()?;
     let center = UNUserNotificationCenter::currentNotificationCenter();

@@ -407,6 +407,7 @@ simply ignored there:
 | DnD bypass          | ✓ (with user grant) | ✓ (with entitlement) | – | – |
 | quiet permission    | ✓ (reports state) | ✓ (provisional) | ✓ | ✓ |
 | active-notification query | ✓ | ✓        | ✓ (this run) | ✓ (this run) |
+| app badge control (`set_app_badge`) | – (follows notifications by design) | ✓ (iOS 16+/macOS 13+) | ✓ | ✓ (Unity LauncherEntry, desktop-dependent) |
 | settings read-back  | ✓ (per channel/conversation) | ✓ (app-level) | ✓ (app-level) | ✓ (service reachability) |
 | open settings UI    | ✓ (down to one conversation) | ✓ (iOS: app page; macOS: system pane, best-effort) | ✓ (system page) | –     |
 | `OpenSettings` hook | –       | ✓         | –       | –     |

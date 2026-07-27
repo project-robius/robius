@@ -26,6 +26,26 @@ android-build.workspace = true
 
 
 [features]
+default = ["zbus-async-io"]
+
+## Selects zbus's built-in async-io executor for the Linux backend.
+## The default; irrelevant on non-Linux platforms.
+zbus-async-io = ["zbus/async-io"]
+
+## Backs the Linux backend's D-Bus I/O with tokio instead of zbus's bundled
+## async-io executor. For an app that already depends on tokio, enabling this
+## (with `default-features = false`) drops the whole async-io dependency stack
+## from Linux builds. Irrelevant on non-Linux platforms.
+##
+## Note: zbus still drives this on its own internal runtime rather than your
+## app's, so this is purely a dependency-graph choice, not executor sharing;
+## either way the D-Bus work happens on a thread this crate owns, so calls
+## are safe from anywhere (including inside a tokio runtime).
+##
+## With `default-features = false`, exactly one of `zbus-async-io` or `tokio`
+## must be enabled, or the Linux backend won't compile.
+tokio = ["zbus/tokio"]
+
 ## Enables Apple communication notifications for conversation-style notifications,
 ## where it shows sender/group avatars, Siri & Focus intents, etc. on iOS 15+/macOS 12+.
 ##
@@ -107,7 +127,9 @@ objc2-app-kit = { workspace = true, features = [
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus.workspace = true
+## The executor backend comes from this crate's `zbus-async-io` (default)
+## or `tokio` feature.
+zbus = { workspace = true, features = ["blocking-api"] }
 
 
 [target.'cfg(target_os = "windows")'.dependencies]

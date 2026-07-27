@@ -168,6 +168,11 @@ fn report_permission_state(callback: PermissionCallback) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn set_app_badge(_count: u32) -> Result<()> {
+    // Launcher badges follow the app's active notifications on Android.
+    Ok(())
+}
+
 pub(crate) fn active_notification_ids(callback: ActiveIdsCallback) -> Result<()> {
     // The whole query is synchronous, so the callback runs before we return.
     let ids = robius_android_env::with_activity(|env, activity| {

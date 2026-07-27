@@ -949,6 +949,29 @@ pub fn open_notification_settings(scope: SettingsScope) -> Result<()> {
     sys::open_notification_settings(scope)
 }
 
+/// Sets the app's icon badge to `count` (`0` clears it), independent of any
+/// notification.
+///
+/// A notification's own [`set_badge_count`](Notification::set_badge_count)
+/// applies when it's delivered; this function updates the badge at any other
+/// time — most importantly to clear it once the user has caught up.
+///
+/// * **iOS/macOS**: sets the app icon badge (iOS 16+/macOS 13+; a quiet
+///   no-op on older systems). Requires notification permission.
+/// * **Windows**: sets the taskbar/start badge for the app's AppUserModelID.
+/// * **Android**: launcher badges derive from the app's active notifications
+///   by design — the number comes from each notification's
+///   [`set_badge_count`](Notification::set_badge_count), and cancelling
+///   notifications retracts it — so this is a no-op (Android has no public
+///   app-badge API).
+/// * **Linux**: best-effort via the de-facto Unity LauncherEntry signal,
+///   honored by some desktops/docks (KDE Plasma, elementary); requires
+///   [`set_app_id`] so the badge can be attributed to the app's `.desktop`
+///   entry. Silently ignored elsewhere.
+pub fn set_app_badge(count: u32) -> Result<()> {
+    sys::set_app_badge(count)
+}
+
 /// Declares whether this app has its own in-app notification settings screen.
 /// Call this before [`request_permission`].
 ///
@@ -1227,6 +1250,17 @@ fn prepare_conversation_history(
     }
     options.conversation_messages = snapshot;
     Some((conversation.id.clone(), message))
+}
+
+/// Forgets the accumulated message history of a [`Conversation`], so the next
+/// notification in it starts fresh instead of re-showing older messages.
+///
+/// Call this when the user has read the conversation in your app (typically
+/// together with [`cancel`]), matching how messaging apps clear a
+/// conversation's notification once it's been seen. No-op if the conversation
+/// has no history.
+pub fn clear_conversation_history(conversation_id: &str) {
+    conversation_histories().lock().unwrap().remove(conversation_id);
 }
 
 /// Commits a shown notification's message to its conversation's shared history.

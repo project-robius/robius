@@ -20,7 +20,7 @@ use windows::{
     Foundation::{DateTime, IPropertyValue, IReference, PropertyValue, TypedEventHandler, Uri},
     System::Launcher,
     UI::Notifications::{
-        NotificationData, NotificationSetting, NotificationUpdateResult,
+        BadgeNotification, BadgeUpdateManager, NotificationData, NotificationSetting, NotificationUpdateResult,
         ScheduledToastNotification, ToastActivatedEventArgs, ToastDismissalReason,
         ToastDismissedEventArgs, ToastNotification, ToastNotificationManager, ToastNotifier,
     },
@@ -262,6 +262,18 @@ pub(crate) fn open_notification_settings(_scope: SettingsScope) -> Result<()> {
 
 pub(crate) fn init_interaction_listener() -> Result<()> {
     // Nothing to set up: interactions arrive via the per-toast event handlers.
+    Ok(())
+}
+
+pub(crate) fn set_app_badge(count: u32) -> Result<()> {
+    let updater = BadgeUpdateManager::CreateBadgeUpdaterForApplicationWithId(&aumid())?;
+    if count == 0 {
+        updater.Clear()?;
+        return Ok(());
+    }
+    let xml = XmlDocument::new()?;
+    xml.LoadXml(&HSTRING::from(format!(r#"<badge value="{count}"/>"#)))?;
+    updater.Update(&BadgeNotification::CreateBadgeNotification(&xml)?)?;
     Ok(())
 }
 

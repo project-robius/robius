@@ -79,7 +79,9 @@ objc2-user-notifications       = { version = "0.3.2", default-features = false, 
 
 
 ## Linux-specific dependencies used in multiple crates in the workspace.
-zbus = ">=5.12.0, <5.13.0"
+## Note: default features are off so that each crate can pick zbus's executor
+## backend (async-io vs tokio); see robius-notifications' features.
+zbus = { version = ">=5.12.0, <5.13.0", default-features = false }
 zbus_polkit = "5.0.0"
 libc = "0.2"
 

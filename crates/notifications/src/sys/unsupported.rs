@@ -41,3 +41,7 @@ pub(crate) fn open_notification_settings(_: SettingsScope) -> Result<()> {
 pub(crate) fn active_notification_ids(_: ActiveIdsCallback) -> Result<()> {
     Err(Error::Unsupported)
 }
+
+pub(crate) fn set_app_badge(_: u32) -> Result<()> {
+    Err(Error::Unsupported)
+}

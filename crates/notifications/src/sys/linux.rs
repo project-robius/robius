@@ -24,6 +24,60 @@ use crate::{
 /// so `show()` never sees a future `scheduled_time`.
 pub(crate) const NATIVE_SCHEDULING: bool = false;
 
+/// Work handed to the dedicated D-Bus thread; see [`run_blocking`].
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+thread_local! {
+    /// Whether this thread is our D-Bus worker, so nested calls run inline.
+    static ON_WORKER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs blocking D-Bus work on a dedicated thread, then hands back the result.
+///
+/// zbus's blocking API drives an executor internally, and with the `tokio`
+/// feature that means `Runtime::block_on`, which panics outright when the
+/// calling thread is already inside a tokio runtime -- a perfectly normal
+/// place for an app to call us from. Hopping onto our own thread keeps every
+/// entry point safe to call from anywhere, whichever executor is selected.
+fn run_blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    // A nested call (one of our own functions calling another) is already
+    // off-runtime; running it inline avoids waiting on ourselves forever.
+    if ON_WORKER.with(|on| on.get()) {
+        return work();
+    }
+
+    static JOBS: OnceLock<Mutex<std::sync::mpsc::Sender<Job>>> = OnceLock::new();
+    let sender = JOBS
+        .get_or_init(|| {
+            let (sender, receiver) = std::sync::mpsc::channel::<Job>();
+            // Detached on purpose: it lives as long as the process does.
+            std::thread::Builder::new()
+                .name("robius-notifications-dbus".to_owned())
+                .spawn(move || {
+                    ON_WORKER.with(|on| on.set(true));
+                    for job in receiver {
+                        // A panicking job mustn't take the worker down with it.
+                        let _ = std::panic::catch_unwind(AssertUnwindSafe(job));
+                    }
+                })
+                .expect("failed to spawn the D-Bus worker thread");
+            Mutex::new(sender)
+        })
+        .lock()
+        .unwrap()
+        .clone();
+
+    let (result_sender, result_receiver) = std::sync::mpsc::channel();
+    let job: Job = Box::new(move || {
+        let _ = result_sender.send(work());
+    });
+    sender.send(job).map_err(|_| Error::Unknown)?;
+    // The result sender is only dropped unsent if the job itself panicked.
+    result_receiver.recv().map_err(|_| Error::Unknown)?
+}
+
 const DEST: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const IFACE: &str = "org.freedesktop.Notifications";
@@ -132,7 +186,7 @@ fn map_zbus_error(err: zbus::Error) -> Error {
     }
 }
 
-pub(crate) fn show(options: NotificationOptions) -> Result<()> {
+fn show_inner(options: NotificationOptions) -> Result<()> {
     // Make sure the signal listener is up so interactions get delivered.
     let _ = ensure_listener();
 
@@ -292,7 +346,7 @@ pub(crate) fn update_progress(options: &NotificationOptions) -> Result<()> {
     show(options)
 }
 
-pub(crate) fn cancel(id: &str) -> Result<()> {
+fn cancel_inner(id: &str) -> Result<()> {
     let Some(server_id) = server_ids().lock().unwrap().get(id).copied() else {
         // never shown (or already closed): nothing to cancel
         return Ok(());
@@ -302,7 +356,7 @@ pub(crate) fn cancel(id: &str) -> Result<()> {
     close_notification(&proxy, server_id)
 }
 
-pub(crate) fn cancel_all() -> Result<()> {
+fn cancel_all_inner() -> Result<()> {
     let ids: Vec<u32> = server_ids().lock().unwrap().values().copied().collect();
     if ids.is_empty() {
         return Ok(());
@@ -313,6 +367,19 @@ pub(crate) fn cancel_all() -> Result<()> {
         close_notification(&proxy, server_id)?;
     }
     Ok(())
+}
+
+pub(crate) fn show(options: NotificationOptions) -> Result<()> {
+    run_blocking(move || show_inner(options))
+}
+
+pub(crate) fn cancel(id: &str) -> Result<()> {
+    let id = id.to_owned();
+    run_blocking(move || cancel_inner(&id))
+}
+
+pub(crate) fn cancel_all() -> Result<()> {
+    run_blocking(cancel_all_inner)
 }
 
 fn close_notification(proxy: &Proxy<'_>, server_id: u32) -> Result<()> {
@@ -332,6 +399,29 @@ pub(crate) fn request_permission(callback: PermissionCallback, _provisional: boo
     Ok(())
 }
 
+fn set_app_badge_inner(count: u32) -> Result<()> {
+    // There's no freedesktop standard for badges, but the de-facto Unity
+    // LauncherEntry signal is still honored by several desktops and docks
+    // (KDE Plasma, elementary, Dash-to-Dock). It attributes by .desktop id,
+    // so without a `set_app_id` there's nothing to hang the badge on.
+    let Some(desktop_entry) = crate::app_id() else {
+        return Ok(());
+    };
+    let connection = connection()?;
+    let mut properties: HashMap<&str, Value> = HashMap::new();
+    properties.insert("count", Value::I64(i64::from(count)));
+    properties.insert("count-visible", Value::from(count > 0));
+    connection
+        .emit_signal(
+            Option::<zbus::names::BusName>::None,
+            "/com/canonical/unity/launcherentry/robius",
+            "com.canonical.Unity.LauncherEntry",
+            "Update",
+            &(format!("application://{desktop_entry}.desktop"), properties),
+        )
+        .map_err(map_zbus_error)
+}
+
 pub(crate) fn active_notification_ids(callback: ActiveIdsCallback) -> Result<()> {
     // Entries are pruned on NotificationClosed, so what's still tracked
     // approximates "still showing". Dedupe in case a replacement briefly
@@ -348,7 +438,7 @@ pub(crate) fn active_notification_ids(callback: ActiveIdsCallback) -> Result<()>
     Ok(())
 }
 
-pub(crate) fn notification_settings(_scope: SettingsScope, callback: SettingsCallback) -> Result<()> {
+fn notification_settings_inner(callback: SettingsCallback) -> Result<()> {
     // Linux has no per-app/channel/conversation settings; "enabled" just
     // means the session bus and a notification daemon are reachable.
     let enabled = service_reachable()?;
@@ -361,6 +451,17 @@ pub(crate) fn notification_settings(_scope: SettingsScope, callback: SettingsCal
         priority_conversation: None,
     }));
     Ok(())
+}
+
+pub(crate) fn set_app_badge(count: u32) -> Result<()> {
+    run_blocking(move || set_app_badge_inner(count))
+}
+
+pub(crate) fn notification_settings(
+    _scope: SettingsScope,
+    callback: SettingsCallback,
+) -> Result<()> {
+    run_blocking(move || notification_settings_inner(callback))
 }
 
 /// Whether the session bus and a notification daemon are reachable.
@@ -387,7 +488,7 @@ pub(crate) fn open_notification_settings(_scope: SettingsScope) -> Result<()> {
 }
 
 pub(crate) fn init_interaction_listener() -> Result<()> {
-    ensure_listener()
+    run_blocking(ensure_listener)
 }
 
 /// Starts the signal listener thread (once). It owns its own connection
