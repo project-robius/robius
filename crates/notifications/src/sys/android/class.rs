@@ -41,6 +41,9 @@ unsafe extern "C" fn rust_interaction_callback<'a>(
     metadata_keys: JObjectArray<'a>,
     metadata_values: JObjectArray<'a>,
 ) {
+    // Unwinding into the JVM would abort the process, so nothing below is
+    // allowed to escape as a panic.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
     // Read all JNI data up front, while we still hold the env on the Java
     // callback thread (usually the Android main thread).
     let Some(notification_id) = optional_jstring(&mut env, &notification_id) else {
@@ -69,6 +72,7 @@ unsafe extern "C" fn rust_interaction_callback<'a>(
     // Hand it to the app on a background thread, so its handler can block
     // without freezing the Android main thread.
     std::thread::spawn(move || crate::deliver_interaction(interaction));
+    }));
 }
 
 // NOTE: The signature of this function must be kept in sync with
@@ -79,6 +83,8 @@ unsafe extern "C" fn rust_permission_callback<'a>(
     callback_ptr: jlong,
     granted: jboolean,
 ) {
+    // As above: never unwind into the JVM.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
     let callback_ptr = callback_ptr as *mut PermissionCallback;
     if callback_ptr.is_null() {
         return;
@@ -91,6 +97,7 @@ unsafe extern "C" fn rust_permission_callback<'a>(
     // Run the app's callback on a background thread, so it can block if needed
     // without freezing the Android main thread.
     std::thread::spawn(move || callback(Ok(granted != 0)));
+    }));
 }
 
 fn optional_jstring(env: &mut JNIEnv<'_>, value: &JString<'_>) -> Option<String> {

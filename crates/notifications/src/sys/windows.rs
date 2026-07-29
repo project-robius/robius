@@ -503,9 +503,11 @@ fn register_interaction_handlers(
 ) -> Result<()> {
     toast.Activated(&TypedEventHandler::new(
         |_sender: &Option<ToastNotification>, args: &Option<IInspectable>| {
-            let Some(args) = args else { return Ok(()) };
+            // WinRT invokes this; unwinding into it would abort the process.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let Some(args) = args else { return };
             let Ok(args) = args.cast::<ToastActivatedEventArgs>() else {
-                return Ok(());
+                return;
             };
             let arguments = args
                 .Arguments()
@@ -524,6 +526,7 @@ fn register_interaction_handlers(
                 kind,
                 metadata,
             });
+            }));
             Ok(())
         },
     ))?;
@@ -532,15 +535,18 @@ fn register_interaction_handlers(
     let metadata = options.metadata.clone();
     toast.Dismissed(&TypedEventHandler::new(
         move |_sender: &Option<ToastNotification>, args: &Option<ToastDismissedEventArgs>| {
-            let Some(args) = args else { return Ok(()) };
+            // As above: never unwind into WinRT.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let Some(args) = args else { return };
             // Only user dismissals count; timeouts and app hides aren't interactions.
-            if args.Reason()? == ToastDismissalReason::UserCanceled {
+            if args.Reason().is_ok_and(|reason| reason == ToastDismissalReason::UserCanceled) {
                 crate::deliver_interaction(Interaction {
                     notification_id: notification_id.clone(),
                     kind: InteractionKind::Dismissed,
                     metadata: metadata.clone(),
                 });
             }
+            }));
             Ok(())
         },
     ))?;

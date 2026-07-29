@@ -47,10 +47,9 @@ const BASE_CATEGORY_ID: &str = "robius-notifications-base";
 pub(crate) const NATIVE_SCHEDULING: bool = true;
 
 pub(crate) fn show(options: NotificationOptions) -> Result<()> {
-    ensure_app_bundle()?;
+    let center = notification_center()?;
     // Without our delegate installed, a foregrounded app shows nothing.
-    ensure_delegate();
-    let center = UNUserNotificationCenter::currentNotificationCenter();
+    ensure_delegate(&center);
     let content = build_content(&center, &options)?;
     // Conversation notifications get the full communication treatment
     // (sender avatar, Focus integration) when the feature is enabled.
@@ -109,8 +108,7 @@ pub(crate) fn update_progress(_options: &NotificationOptions) -> Result<()> {
 }
 
 pub(crate) fn cancel(id: &str) -> Result<()> {
-    ensure_app_bundle()?;
-    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let center = notification_center()?;
     let ids = NSArray::from_retained_slice(&[NSString::from_str(id)]);
     center.removePendingNotificationRequestsWithIdentifiers(&ids);
     center.removeDeliveredNotificationsWithIdentifiers(&ids);
@@ -118,19 +116,17 @@ pub(crate) fn cancel(id: &str) -> Result<()> {
 }
 
 pub(crate) fn cancel_all() -> Result<()> {
-    ensure_app_bundle()?;
-    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let center = notification_center()?;
     center.removeAllPendingNotificationRequests();
     center.removeAllDeliveredNotifications();
     Ok(())
 }
 
 pub(crate) fn request_permission(callback: PermissionCallback, provisional: bool) -> Result<()> {
-    ensure_app_bundle()?;
+    let center = notification_center()?;
     // Install the delegate now, so an OpenSettings event can reach us
     // even if the app never shows a notification first.
-    ensure_delegate();
-    let center = UNUserNotificationCenter::currentNotificationCenter();
+    ensure_delegate(&center);
     let mut options =
         UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound | UNAuthorizationOptions::Badge;
     if crate::provides_notification_settings() {
@@ -164,15 +160,14 @@ pub(crate) fn request_permission(callback: PermissionCallback, provisional: bool
 }
 
 pub(crate) fn init_interaction_listener() -> Result<()> {
-    ensure_app_bundle()?;
-    ensure_delegate();
+    let center = notification_center()?;
+    ensure_delegate(&center);
     Ok(())
 }
 
 // Every scope reports app-level settings; that's all the OS exposes to apps here.
 pub(crate) fn notification_settings(_scope: SettingsScope, callback: SettingsCallback) -> Result<()> {
-    ensure_app_bundle()?;
-    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let center = notification_center()?;
     // The block must be a `Fn`, but our callback is `FnOnce`: park it for the one call.
     let callback = Mutex::new(Some(callback));
     let block = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
@@ -189,8 +184,7 @@ pub(crate) fn notification_settings(_scope: SettingsScope, callback: SettingsCal
 }
 
 pub(crate) fn set_app_badge(count: u32) -> Result<()> {
-    ensure_app_bundle()?;
-    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let center = notification_center()?;
     // setBadgeCount: only exists on iOS 16+/macOS 13+; on older systems the
     // badge just keeps following the last-delivered notification's count.
     if !center.respondsToSelector(sel!(setBadgeCount:withCompletionHandler:)) {
@@ -201,8 +195,7 @@ pub(crate) fn set_app_badge(count: u32) -> Result<()> {
 }
 
 pub(crate) fn active_notification_ids(callback: ActiveIdsCallback) -> Result<()> {
-    ensure_app_bundle()?;
-    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let center = notification_center()?;
     // The block must be a `Fn`, but our callback is `FnOnce`: park it for the one call.
     let callback = Mutex::new(Some(callback));
     let block = RcBlock::new(move |notifications: NonNull<NSArray<UNNotification>>| {
@@ -294,13 +287,13 @@ fn setting_flag(setting: UNNotificationSetting) -> Option<bool> {
 
 // Installs our delegate on the center. show() needs this too (for foreground
 // presentation); interactions with no app handler just queue up harmlessly.
-fn ensure_delegate() {
+fn ensure_delegate(center: &UNUserNotificationCenter) {
     // The center only holds its delegate weakly, so this static keeps ours alive forever.
     static DELEGATE: OnceLock<DelegateHolder> = OnceLock::new();
     let delegate = DELEGATE.get_or_init(|| DelegateHolder(Delegate::new()));
     let protocol: &ProtocolObject<dyn UNUserNotificationCenterDelegate> =
         ProtocolObject::from_ref(&*delegate.0);
-    UNUserNotificationCenter::currentNotificationCenter().setDelegate(Some(protocol));
+    center.setDelegate(Some(protocol));
 }
 
 // After setup the delegate is only ever poked by ObjC callbacks, never from Rust.
@@ -310,12 +303,34 @@ unsafe impl Sync for DelegateHolder {}
 
 // Bail out when not running from a .app bundle: UNUserNotificationCenter throws
 // an ObjC exception (killing the process) in unbundled binaries, e.g. `cargo run`.
+//
+// A bundle identifier alone isn't proof of one: a bare binary can carry an
+// embedded `__info_plist` section (Makepad adds one), which gives it an
+// identifier while the system still has no app registered for it. The bundle
+// path is what actually tells the two apart.
 fn ensure_app_bundle() -> Result<()> {
-    if NSBundle::mainBundle().bundleIdentifier().is_some() {
+    let bundle = NSBundle::mainBundle();
+    let is_app_bundle = bundle.bundlePath().to_string().ends_with(".app");
+    if is_app_bundle && bundle.bundleIdentifier().is_some() {
         Ok(())
     } else {
         Err(Error::NoAppBundle)
     }
+}
+
+/// The notification center, or [`Error::NoAppBundle`] if the OS refuses to
+/// hand one out.
+///
+/// Even a real `.app` can be unregistered with the system (e.g. a bundle
+/// assembled by hand for development), and the first touch of the center
+/// throws an ObjC exception that would abort the process. Catching it lets
+/// the app carry on without notifications instead of dying.
+fn notification_center() -> Result<Retained<UNUserNotificationCenter>> {
+    ensure_app_bundle()?;
+    // The call has no side effects to unwind past; on failure the center
+    // simply never existed.
+    objc2::exception::catch(UNUserNotificationCenter::currentNotificationCenter)
+        .map_err(|_| Error::NoAppBundle)
 }
 
 fn build_content(

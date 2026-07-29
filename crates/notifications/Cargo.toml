@@ -68,7 +68,9 @@ robius-android-env.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 block2.workspace = true
-objc2.workspace = true
+## "exception" lets us survive UNUserNotificationCenter throwing in an
+## app bundle the system hasn't registered, instead of aborting the process.
+objc2 = { workspace = true, features = ["exception"] }
 objc2-intents = { workspace = true, optional = true, features = [
     "INImage",
     "INIntent",
