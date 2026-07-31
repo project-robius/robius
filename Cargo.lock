@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "robius-authentication"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "android-build",
  "block2",
@@ -1000,11 +1000,11 @@ dependencies = [
 
 [[package]]
 name = "robius-common"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "robius-directories"
-version = "6.0.0"
+version = "6.0.1"
 dependencies = [
  "bencher",
  "dirs-sys",
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "robius-file-picker"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "android-build",
  "block2",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "robius-location"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "android-build",
  "cfg-if",
@@ -1050,7 +1050,7 @@ dependencies = [
 
 [[package]]
 name = "robius-open"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "block2",
  "cfg-if",
@@ -1067,7 +1067,7 @@ dependencies = [
 
 [[package]]
 name = "robius-share"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "android-build",
  "cfg-if",
@@ -1085,7 +1085,7 @@ dependencies = [
 
 [[package]]
 name = "robius-web-auth-session"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "block2",
  "cfg-if",
