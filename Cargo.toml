@@ -28,7 +28,7 @@ exclude = [
 
 ## Package details that are shared across multiple crates in the workspace.
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 authors = [
     "Kevin Boos <kevinaboos@gmail.com>",
@@ -79,9 +79,10 @@ objc2-user-notifications       = { version = "0.3.2", default-features = false, 
 
 
 ## Linux-specific dependencies used in multiple crates in the workspace.
-## Note: default features are off so that each crate can pick zbus's executor
-## backend (async-io vs tokio); see robius-notifications' features.
-zbus = { version = ">=5.12.0, <5.13.0", default-features = false }
+
+## Note: default features are off so that each crate can pick the
+## zbus executor backend (async-io / tokio) that it wants.
+zbus = { version = "5.11", default-features = false }
 zbus_polkit = "5.0.0"
 libc = "0.2"
 

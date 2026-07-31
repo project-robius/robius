@@ -1,6 +1,6 @@
 [package]
 name        = "robius-directories"
-version     = "6.0.0"
+version     = "6.0.1"
 authors     = [
     "Simon Ochsenreither <simon@ochsenreither.de>",
     "Kevin Boos <kevinaboos@gmail.com>",
@@ -12,7 +12,7 @@ Supports Linux (XDG spec), Windows (Known Folders), macOS and iOS (Standard Dire
 This crate is a fork of the (now-archived) `directories` crate, with support for Android.
 """
 edition     = "2015"
-rust-version = "1.77.0"
+rust-version = "1.64.0"
 readme      = "README.md"
 license     = "MIT OR Apache-2.0"
 repository  = "https://github.com/project-robius/robius"
