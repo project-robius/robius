@@ -72,7 +72,7 @@ objc2-uniform-type-identifiers = { workspace = true, features = [
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
-robius-directories = { path = "../directories" }
+robius-directories = { version = "6.0", path = "../directories" }
 
 
 ## On macOS the native file panels must run on the main thread,
