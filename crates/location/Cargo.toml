@@ -39,6 +39,18 @@ jni.workspace = true
 robius-android-env.workspace = true
 
 
+[target.'cfg(target_os = "linux")'.dependencies]
+## Workspace zbus has default features off, so pick the executor and blocking API we need.
+zbus = { workspace = true, features = ["async-io", "blocking-api"] }
+
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+## Only to check we work when called from inside someone else's Tokio runtime.
+## Note: deliberately does *not* turn on zbus's `tokio` feature, which would swap out the
+## transport we're actually testing (zbus picks its executor at compile time, tokio wins).
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+
+
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2.workspace = true
 objc2-foundation = { workspace = true, features = [ "NSBundle", "NSEnumerator" ] }
