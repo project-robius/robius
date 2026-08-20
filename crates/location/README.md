@@ -1,8 +1,23 @@
 # `robius-location`
 
-A Rust library to access system-provided location/GPS data across multiple platforms.
+A Rust library to access system-provided location/GPS data across Linux, Android, iOS, macOS, and
+Windows.
 
-Currently supports iOS, macOS, Windows, and Android, with Linux support coming soon.
+## Usage on Linux
+
+Linux picks one of two paths automatically, and needs no setup from you:
+* [XDG Desktop Portal Location API][location-portal] (v1), always preferred.
+  Works sandboxed or not, and the desktop handles the permission prompt.
+* [GeoClue] directly, only if the session bus, portal, or Location interface is missing at startup.
+  * Never used after a portal denial, and never for Flatpak/Snap apps.
+
+There's no C library or `-dev` package to link against. You just need a running GeoClue service,
+which is already handled by the majority of distros.
+* If you ship a `.deb`/`.rpm`, add a dependency on `geoclue-2.0` (Debian/Ubuntu), `geoclue2` (Fedora/RHEL),
+  or `geoclue` (Arch/Alpine). Flatpaks don't need that, just use the host portal.
+
+[GeoClue]: https://gitlab.freedesktop.org/geoclue/geoclue
+[location-portal]: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Location.html
 
 ## Usage on iOS
 To use this crate on iOS, you must add the following to your app's `Info.plist`:

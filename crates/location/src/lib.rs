@@ -1,5 +1,20 @@
 //! A library to access system location data.
 //!
+//! ## Linux
+//!
+//! Uses the XDG Desktop Portal, falling back to GeoClue directly if the portal isn't there (never
+//! after a portal denial). No setup needed on a normal desktop install; see the README for what
+//! minimal distros need. Both [`Access`] variants map to the same portal permission, and one-shot
+//! requests give up after 60 seconds.
+//!
+//! **Note:** every `Manager` method blocks on D-Bus round trips. Usually milliseconds, but a wedged
+//! service can stall [`Manager::new`] for 45s and the rest for 30s (portal) or 45s (GeoClue), so
+//! keep them off your UI thread.
+//!
+//! If the provider dies, you get [`Error::TemporarilyUnavailable`] and updates stop. The next call
+//! reconnects, so just retry. Nothing carries over though, so the user may be asked to authorize
+//! again.
+//!
 //! ## Android
 //!
 //! On Android the following must be added to the manifest:
@@ -33,7 +48,8 @@ pub use crate::error::{Error, Result};
 
 /// A manager for dealing with location data and handling location updates.
 ///
-/// **All location manager functions must be called from the main thread**.
+/// All functions must be called from the main thread, except on Linux, where any thread works
+/// (including from inside a handler callback).
 ///
 /// As soon as the handler is registered, it may receive updates immediately,
 /// even if `update_once` or `start_updates` are not called.
@@ -45,7 +61,7 @@ pub struct Manager {
 impl Manager {
     /// Creates a new location manager with the given handler.
     ///
-    /// This **must** be called from the main thread due to platform restrictions.
+    /// Must be called from the main thread, except on Linux.
     pub fn new<T>(handler: T) -> Result<Self>
     where
         T: Handler,
@@ -55,16 +71,45 @@ impl Manager {
         })
     }
 
+    /// Like [`Manager::new`], but with an explicit GeoClue desktop ID.
+    ///
+    /// Prefer [`Manager::new`], which works this out itself. This is an escape hatch for odd or
+    /// legacy GeoClue setups. Pass an installed desktop-file ID without the `.desktop` suffix
+    /// (ASCII letters, digits, `.`, `_`, `-`); it's validated either way.
+    ///
+    /// Available everywhere so cross-platform code can call it unconditionally; off Linux the ID is
+    /// ignored.
+    #[cfg(target_os = "linux")]
+    pub fn new_with_desktop_id<T>(handler: T, desktop_id: &str) -> Result<Self>
+    where
+        T: Handler,
+    {
+        Ok(Manager {
+            inner: sys::Manager::new_with_desktop_id(handler, desktop_id)?,
+        })
+    }
+
+    /// See the Linux variant; off Linux the desktop ID is ignored.
+    #[cfg(not(target_os = "linux"))]
+    pub fn new_with_desktop_id<T>(handler: T, _desktop_id: &str) -> Result<Self>
+    where
+        T: Handler,
+    {
+        Self::new(handler)
+    }
+
     /// Requests authorization to access location data.
     ///
-    /// iOS/Android: returns immediately; a request made before authorization is deferred until the
-    /// user responds, and a denial goes to [`Handler::error`]. Windows: blocks and returns the result.
+    /// Linux (portal), iOS, and Android return immediately; a request made beforehand waits for the
+    /// user, and a denial goes to [`Handler::error`]. Linux (GeoClue) and Windows block and return
+    /// the result.
     pub fn request_authorization(&self, access: Access, accuracy: Accuracy) -> Result<()> {
         self.inner.request_authorization(access, accuracy)
     }
 
     /// Requests the device's current location, delivered to the handler. May deliver a cached fix
-    /// immediately, then a fresher one once acquired.
+    /// immediately, then a fresher one once acquired. On Linux, gives up after 60 seconds with
+    /// [`Error::TemporarilyUnavailable`] if nothing arrives.
     pub fn update_once(&self) -> Result<()> {
         self.inner.update_once()
     }
