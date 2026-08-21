@@ -29,7 +29,8 @@ use objc2_ui_kit::{
 use objc2_uniform_type_identifiers::{UTType, UTTypeImage, UTTypeItem, UTTypeMovie};
 
 use crate::{
-    DialogCallback, DialogData, DialogOptions, Error, PickedFile, FileFilter, MediaKind, Result,
+    DialogCallback, DialogData, DialogOptions, Error, PickedFile, FileFilter, MediaKind,
+    MediaRepresentation, Result,
     StartLocation, DEFAULT_IMAGE_EXTENSIONS, DEFAULT_VIDEO_EXTENSIONS,
 };
 
@@ -460,12 +461,16 @@ fn show_media_inner(
     let configuration = unsafe { PHPickerConfiguration::init(PHPickerConfiguration::alloc()) };
     let filter = media_filter(media_kind);
 
+    // `Compatible` lets iOS transcode, e.g. a HEIC photo comes back as JPEG.
+    let representation_mode = match options.media_representation {
+        MediaRepresentation::Original => PHPickerConfigurationAssetRepresentationMode::Current,
+        MediaRepresentation::Compatible => PHPickerConfigurationAssetRepresentationMode::Compatible,
+    };
+
     unsafe {
         configuration.setSelectionLimit(1);
         configuration.setFilter(Some(&filter));
-        configuration.setPreferredAssetRepresentationMode(
-            PHPickerConfigurationAssetRepresentationMode::Current,
-        );
+        configuration.setPreferredAssetRepresentationMode(representation_mode);
     }
 
     let picker = unsafe {
