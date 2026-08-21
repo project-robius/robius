@@ -185,6 +185,18 @@ impl FileDialog {
         self
     }
 
+    /// Sets which representation of a picked media item the platform should hand back.
+    ///
+    /// Only the media pickers ([`pick_image`](Self::pick_image),
+    /// [`pick_video`](Self::pick_video), [`pick_image_or_video`](Self::pick_image_or_video),
+    /// [`pick_media`](Self::pick_media)) use this, and only on iOS so far.
+    /// Defaults to [`MediaRepresentation::Original`].
+    #[must_use]
+    pub fn set_media_representation(mut self, representation: MediaRepresentation) -> Self {
+        self.options.media_representation = representation;
+        self
+    }
+
     /// Shows a native open-file dialog.
     ///
     /// The callback is called with `Ok(None)` if the user cancels the dialog.
@@ -296,6 +308,22 @@ impl MediaKind {
     }
 }
 
+/// Which representation of a picked media item the platform should hand back.
+///
+/// Used with [`FileDialog::set_media_representation`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MediaRepresentation {
+    /// Hand back the item as it is stored, without re-encoding it.
+    #[default]
+    Original,
+    /// Prefer a widely-supported format, letting the platform transcode if it must.
+    ///
+    /// iOS converts HEIC photos to JPEG and HEVC videos to H.264, so pick this when
+    /// the file is headed somewhere that can't read Apple's formats. Transcoding a
+    /// video this way can be slow, so prefer [`Original`](Self::Original) otherwise.
+    Compatible,
+}
+
 /// A well-known directory that a file dialog should start in.
 ///
 /// Used with [`FileDialog::set_start_location`].
@@ -327,6 +355,7 @@ pub(crate) struct DialogOptions {
     pub(crate) file_name: Option<String>,
     pub(crate) title: Option<String>,
     pub(crate) mime_type: Option<String>,
+    pub(crate) media_representation: MediaRepresentation,
 }
 
 impl DialogOptions {
