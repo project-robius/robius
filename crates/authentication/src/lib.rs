@@ -10,7 +10,12 @@
 //!   a Win32 credential-UI fallback for username/password.
 //! - Linux: [`polkit`]-based authentication using the desktop environment's
 //!   prompt.
-//!   - **Note: Linux support is currently incomplete.**
+//!   - Requires a polkit `.policy` file installed to
+//!     `/usr/share/polkit-1/actions/`, whose action ID you pass to
+//!     [`PolicyBuilder::action_ids`]. Without one, [`PolicyBuilder::build`]
+//!     returns `None`.
+//!   - You can only get auth prompt text from that `.policy` file;
+//!     you can't do it programmatically by passing in custom [`Text`].
 //!
 //! # Example
 //!
