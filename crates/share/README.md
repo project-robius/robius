@@ -142,6 +142,3 @@ Android's FileProvider setup is documented here:
 <https://developer.android.com/training/secure-file-sharing/setup-sharing>.
 Android's MediaStore behavior is documented here:
 <https://developer.android.com/training/data-storage/shared/media>.
-
-See [TESTING.md](TESTING.md) for the automated checks and native test cases
-used to validate this crate across platforms.

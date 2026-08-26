@@ -15,7 +15,11 @@ This crate supports:
 * Windows: Windows Hello (face recognition, fingerprint, PIN),
 plus winrt-based fallback for username/password.
 * Linux: [`polkit`]-based authentication using the desktop environment's prompt.
-  * **Note: Linux support is currently incomplete.**
+  * Requires a polkit `.policy` file, whose action ID you pass to `action_ids()`.
+    Without one, `PolicyBuilder::build()` returns `None`. See below for the setup.
+  * You can't set the auth prompt text programmatically, it has to come from that
+    `.policy` file.
+  * The biometrics/password options are no-ops on Linux as well.
 
 
 ## Usage on iOS
