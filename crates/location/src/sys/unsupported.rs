@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 use std::time::SystemTime;
 
-use crate::{Access, Accuracy, Coordinates, Error, Handler, Result};
+use crate::{Access, Accuracy, Coordinates, Error, Freshness, Handler, Result};
 
 pub(crate) struct Manager;
 
@@ -53,5 +53,9 @@ impl Location<'_> {
 
     pub fn time(&self) -> Result<SystemTime> {
         Err(Error::Unknown)
+    }
+
+    pub fn freshness(&self) -> Freshness {
+        Freshness::Live
     }
 }

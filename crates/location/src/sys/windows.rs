@@ -1,7 +1,7 @@
 use std::{
     marker::PhantomData,
     sync::{Arc, Mutex},
-    time::SystemTime,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use windows::{
@@ -12,7 +12,10 @@ use windows::{
     Foundation::{EventRegistrationToken, TimeSpan, TypedEventHandler},
 };
 
-use crate::{Access, Accuracy, Coordinates, Error, Handler, Result};
+use crate::{
+    cached_location_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
+    MAX_CACHED_AGE,
+};
 
 pub(crate) struct Manager {
     inner: Arc<Geolocator>,
@@ -80,6 +83,7 @@ impl Manager {
                             handler.handle(crate::Location {
                                 inner: Location {
                                     inner: coordinate,
+                                    freshness: Freshness::Live,
                                     _phantom_data: PhantomData,
                                 },
                             });
@@ -171,6 +175,7 @@ impl Drop for Manager {
 
 pub struct Location<'a> {
     inner: Geocoordinate,
+    freshness: Freshness,
     _phantom_data: PhantomData<&'a ()>,
 }
 
@@ -195,17 +200,37 @@ impl Location<'_> {
     }
 
     pub fn time(&self) -> Result<SystemTime> {
-        // TODO
-        // Of the form:
-        // https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-systemtime
-        // which is non-trivial to convert to unix time so that we can convert to
-        // SystemTime let _ = self
-        //     .inner
-        //     .Timestamp()?
-        //     .UniversalTime
-        //     .try_into()
-        //     .map_err(|_| Error::Unknown)?;
-        Err(Error::Unknown)
+        system_time_from_winrt(self.inner.Timestamp()?.UniversalTime).ok_or(Error::Unknown)
+    }
+
+    pub fn freshness(&self) -> Freshness {
+        self.freshness
+    }
+}
+
+/// Converts a WinRT `DateTime` to a [`SystemTime`].
+///
+/// `DateTime` is just an `i64` count of 100ns ticks since 1601-01-01 UTC (the `FILETIME` epoch,
+/// not the `SYSTEMTIME` struct), so all we do is move it onto the Unix epoch.
+/// Returns `None` if that doesn't fit in a `SystemTime`, which shouldn't happen for a real one.
+fn system_time_from_winrt(universal_time: i64) -> Option<SystemTime> {
+    /// Ticks between 1601-01-01 and 1970-01-01.
+    const UNIX_EPOCH_TICKS: i64 = 11_644_473_600 * TICKS_PER_SEC;
+    const TICKS_PER_SEC: i64 = 10_000_000;
+
+    let ticks = universal_time.checked_sub(UNIX_EPOCH_TICKS)?;
+    // Split into whole seconds + leftover ticks so we don't overflow the nanosecond count.
+    let magnitude = ticks.unsigned_abs();
+    let (secs, sub_sec_ticks) = (
+        magnitude / TICKS_PER_SEC as u64,
+        (magnitude % TICKS_PER_SEC as u64) as u32,
+    );
+    let delta = Duration::new(secs, sub_sec_ticks * 100);
+    if ticks >= 0 {
+        UNIX_EPOCH.checked_add(delta)
+    } else {
+        // A location from before 1970 is nonsense, but the arithmetic is well-defined, so allow it.
+        UNIX_EPOCH.checked_sub(delta)
     }
 }
 
@@ -213,28 +238,84 @@ fn get_location(geolocator: &Geolocator) -> Result<crate::Location<'_>> {
     Ok(crate::Location {
         inner: Location {
             inner: geolocator.GetGeopositionAsync()?.get()?.Coordinate()?,
+            freshness: Freshness::Live,
             _phantom_data: PhantomData,
         },
     })
 }
 
-// A recently-cached fix, returned near-instantly (short timeout = don't acquire a new one).
+// A recently-cached location, returned near-instantly (short timeout = don't acquire a new one).
 fn get_cached_location(geolocator: &Geolocator) -> Result<crate::Location<'_>> {
-    let max_age = TimeSpan { Duration: 3600 * 10_000_000 }; // accept a fix up to ~1h old
+    // Ask WinRT for the same bound we enforce ourselves. It can still hand back something older,
+    // since it uses whichever is larger of this and an age derived from the accuracy setting.
+    let max_age = TimeSpan { Duration: MAX_CACHED_AGE.as_secs() as i64 * 10_000_000 };
     let timeout = TimeSpan { Duration: 1_000_000 };         // 100ms: return cached, don't acquire anew
-    Ok(crate::Location {
-        inner: Location {
-            inner: geolocator
-                .GetGeopositionAsyncWithAgeAndTimeout(max_age, timeout)?
-                .get()?
-                .Coordinate()?,
-            _phantom_data: PhantomData,
-        },
-    })
+    let location = Location {
+        inner: geolocator
+            .GetGeopositionAsyncWithAgeAndTimeout(max_age, timeout)?
+            .get()?
+            .Coordinate()?,
+        freshness: Freshness::Cached,
+        _phantom_data: PhantomData,
+    };
+    // So check the age ourselves, and drop it rather than pass off an ancient one as current.
+    if !cached_location_is_recent(location.time().ok()) {
+        return Err(Error::TemporarilyUnavailable);
+    }
+    Ok(crate::Location { inner: location })
 }
 
 impl From<windows::core::Error> for Error {
     fn from(_: windows::core::Error) -> Self {
         Error::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ticks from 1601-01-01 to 1970-01-01, i.e. what `DateTime` holds at the Unix epoch.
+    const EPOCH: i64 = 11_644_473_600 * 10_000_000;
+
+    fn unix_secs(universal_time: i64) -> f64 {
+        let t = system_time_from_winrt(universal_time).unwrap();
+        match t.duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_secs_f64(),
+            Err(e) => -e.duration().as_secs_f64(),
+        }
+    }
+
+    #[test]
+    fn unix_epoch_round_trips() {
+        assert_eq!(system_time_from_winrt(EPOCH), Some(UNIX_EPOCH));
+    }
+
+    #[test]
+    fn converts_a_real_timestamp() {
+        // 2024-01-01T00:00:00Z.
+        let ticks = EPOCH + 1_704_067_200 * 10_000_000;
+        assert_eq!(unix_secs(ticks), 1_704_067_200.0);
+    }
+
+    #[test]
+    fn keeps_sub_second_precision() {
+        // 100ns is finer than a nanosecond count can lose, so this must come back exactly.
+        let t = system_time_from_winrt(EPOCH + 1_234_567).unwrap();
+        assert_eq!(
+            t.duration_since(UNIX_EPOCH).unwrap(),
+            Duration::from_nanos(123_456_700)
+        );
+    }
+
+    #[test]
+    fn handles_times_before_the_unix_epoch() {
+        // Tick 0 is 1601-01-01, the start of the WinRT epoch.
+        assert_eq!(unix_secs(0), -11_644_473_600.0);
+    }
+
+    #[test]
+    fn rejects_values_that_cannot_be_shifted() {
+        assert_eq!(system_time_from_winrt(i64::MIN), None);
     }
 }

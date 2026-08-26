@@ -10,7 +10,7 @@ use objc2_core_location::{
 };
 use objc2_foundation::{NSBundle, NSString};
 
-use crate::{Access, Accuracy, Coordinates, Handler, Result};
+use crate::{Access, Accuracy, Coordinates, Error, Freshness, Handler, Result};
 
 pub(crate) struct Manager {
     inner: Retained<CLLocationManager>,
@@ -57,7 +57,7 @@ impl Manager {
         if self.undetermined() && can_request_location_authorization() {
             self.delegate.defer_update_once();
         } else {
-            self.delegate.begin_one_shot(&self.inner); // deliver the cached fix first, then refine
+            self.delegate.begin_one_shot(&self.inner); // deliver the cached one first, then refine
             unsafe { self.inner.requestLocation() };
         }
         Ok(())
@@ -102,6 +102,13 @@ fn can_request_location_authorization() -> bool {
 
 pub(crate) struct Location<'a> {
     inner: &'a CLLocation,
+    freshness: Freshness,
+}
+
+impl<'a> Location<'a> {
+    pub(super) fn new(inner: &'a CLLocation, freshness: Freshness) -> Self {
+        Self { inner, freshness }
+    }
 }
 
 impl Location<'_> {
@@ -130,8 +137,25 @@ impl Location<'_> {
     }
 
     pub(crate) fn time(&self) -> Result<SystemTime> {
-        let secs = unsafe { self.inner.timestamp().timeIntervalSince1970() };
-        Ok(SystemTime::UNIX_EPOCH + Duration::from_secs_f64(secs))
+        location_time(self.inner).ok_or(Error::Unknown)
+    }
+
+    pub(crate) fn freshness(&self) -> Freshness {
+        self.freshness
+    }
+}
+
+/// `CLLocation.timestamp` as a [`SystemTime`].
+///
+/// It's seconds since the Unix epoch as an `f64`, so it can in principle be negative or nonsense,
+/// and `Duration::from_secs_f64` panics on both. Split the sign off and reject the rest.
+pub(super) fn location_time(location: &CLLocation) -> Option<SystemTime> {
+    let secs = unsafe { location.timestamp().timeIntervalSince1970() };
+    let delta = Duration::try_from_secs_f64(secs.abs()).ok()?;
+    if secs >= 0.0 {
+        SystemTime::UNIX_EPOCH.checked_add(delta)
+    } else {
+        SystemTime::UNIX_EPOCH.checked_sub(delta)
     }
 }
 

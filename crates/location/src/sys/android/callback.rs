@@ -11,7 +11,7 @@ use jni::{
 };
 
 use super::Shared;
-use crate::{Error, Result};
+use crate::{Error, Freshness, Result};
 
 const CALLBACK_BYTECODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/classes.dex"));
 
@@ -19,7 +19,7 @@ const CALLBACK_BYTECODE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/class
 const RUST_CALLBACK_NAME: &str = "rustCallback";
 // NOTE: This must be kept in sync with the signature of `rust_callback`, and
 // the signature specified in `LocationCallback.java`.
-const RUST_CALLBACK_SIGNATURE: &str = "(JLandroid/location/Location;)V";
+const RUST_CALLBACK_SIGNATURE: &str = "(JLandroid/location/Location;Z)V";
 
 // NOTE: This must be kept in sync with `LocationPermissionFragment.java`.
 const PERMISSION_CALLBACK_NAME: &str = "rustPermissionCallback";
@@ -34,6 +34,7 @@ unsafe extern "C" fn rust_callback<'a>(
     _: JObject<'a>,
     shared_ptr: jlong,
     location: JObject<'a>,
+    cached: jboolean,
 ) {
     #[cfg(not(target_pointer_width = "64"))]
     compile_error!("non-64-bit Android targets are not supported");
@@ -46,13 +47,21 @@ unsafe extern "C" fn rust_callback<'a>(
     // this callback has finished, so the pointer stays valid. We only take a shared reference.
     let shared = unsafe { &*(shared_ptr as *const Shared) };
 
+    let freshness = if cached != 0 {
+        Freshness::Cached
+    } else {
+        Freshness::Live
+    };
+
     // A panic must never unwind across the JNI boundary.
-    let _ = catch_unwind(AssertUnwindSafe(|| deliver_location(env, shared, location)));
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        deliver_location(env, shared, location, freshness)
+    }));
 }
 
-fn deliver_location(env: JNIEnv<'_>, shared: &Shared, location: JObject<'_>) {
-    // `getCurrentLocation` delivers `null` when it can't get a fresh fix; fall back to the last
-    // known location before giving up.
+fn deliver_location(env: JNIEnv<'_>, shared: &Shared, location: JObject<'_>, freshness: Freshness) {
+    // `getCurrentLocation` delivers `null` when it can't get a fresh location; fall back to the
+    // last known one before giving up.
     if location.as_raw().is_null() {
         super::deliver_last_known_or_error(shared);
         return;
@@ -70,6 +79,7 @@ fn deliver_location(env: JNIEnv<'_>, shared: &Shared, location: JObject<'_>) {
     let location = crate::Location {
         inner: super::Location {
             inner: global,
+            freshness,
             phantom: PhantomData,
         },
     };

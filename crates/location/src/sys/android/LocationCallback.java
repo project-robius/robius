@@ -19,9 +19,9 @@ import java.util.concurrent.Executor;
  */
 
 public class LocationCallback implements Consumer<Location>, LocationListener {
-    // If a cached fix is at least this recent, just use it instead of waiting for a new one.
+    // If a cached location is at least this recent, just use it instead of waiting for a new one.
     private static final long FRESH_ENOUGH_MILLIS = 60_000L;
-    // How long to wait for a new fix before giving up and using the cached one.
+    // How long to wait for a new location before giving up and using the cached one.
     private static final long GRACE_MILLIS = 4_000L;
     // On API 26-29 requestSingleUpdate has no timeout of its own, so we add one.
     private static final long CLASSIC_GIVE_UP_MILLIS = 10_000L;
@@ -36,11 +36,11 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
 
     private Handler handler;
 
-    // State for a single-location request. If a new fix is slow we fall back to the newest cached
-    // one, and we never hand back a fix older than one we already showed.
-    private boolean oneShotMode;        // only used on API 26-29, where the fix comes via onLocationChanged
-    private Location fallback;          // newest cached fix when the request started (may be null)
-    private long lastDeliveredTime;     // getTime() of the newest fix we've handed back, or -1
+    // State for a single-location request. If a new location is slow we fall back to the newest
+    // cached one, and we never hand back one older than we already showed.
+    private boolean oneShotMode;        // only used on API 26-29, where it arrives via onLocationChanged
+    private Location fallback;          // newest cached location when the request started (or null)
+    private long lastDeliveredTime;     // getTime() of the newest one we've handed back, or -1
     private Runnable graceRunnable;
     private boolean gracePending;
     private Runnable giveUpRunnable;
@@ -50,7 +50,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
      * The name and signature of this function must be kept in sync with `RUST_CALLBACK_NAME`, and
      * `RUST_CALLBACK_SIGNATURE` respectively.
      */
-    private native void rustCallback(long sharedPtr, Location location);
+    private native void rustCallback(long sharedPtr, Location location, boolean cached);
 
     public LocationCallback(long sharedPtr) {
         this.sharedPtr = sharedPtr;
@@ -69,21 +69,22 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
     }
 
     // Hand a location (or null) to Rust. `executing` lets Drop wait for us instead of freeing us mid-call.
-    private void deliver(Location location) {
+    // `cached` says whether this was already sitting there, or the system just measured it.
+    private void deliver(Location location, boolean cached) {
         this.executing = true;
         if (!this.doNotExecute) {
-            rustCallback(this.sharedPtr, location);
+            rustCallback(this.sharedPtr, location, cached);
         }
         this.executing = false;
     }
 
     // Only hand it back if it's newer than the last one, so the location never jumps back in time.
-    private void deliverIfNewer(Location location) {
+    private void deliverIfNewer(Location location, boolean cached) {
         if (location == null || location.getTime() <= lastDeliveredTime) {
             return;
         }
         lastDeliveredTime = location.getTime();
-        deliver(location);
+        deliver(location, cached);
     }
 
     private static Location newer(Location a, Location b) {
@@ -92,13 +93,14 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
         return a.getTime() >= b.getTime() ? a : b;
     }
 
-    // Finish the request with the newer of the new fix and the cached one, or null (an error) if we got neither.
+    // Finish the request with the newer of the new location and the cached one, or null (an error) if we got neither.
     private void resolveOneShot(Location fresh) {
         Location best = newer(fresh, fallback);
         if (best != null) {
-            deliverIfNewer(best);
+            // `best` is one of the two, so anything that isn't the new one came out of the cache.
+            deliverIfNewer(best, best != fresh);
         } else if (lastDeliveredTime < 0L) {
-            deliver(null);
+            deliver(null, false);
         }
     }
 
@@ -115,7 +117,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
             cancelGiveUp();
             resolveOneShot(location);
         } else {
-            deliver(location); // continuous updates: just pass every fix along
+            deliver(location, false); // continuous updates: just pass every location along
         }
     }
 
@@ -127,7 +129,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
         this.executing = true;
         if (!this.doNotExecute) {
                 for (Location location : locations) {
-                    rustCallback(this.sharedPtr, location);
+                    rustCallback(this.sharedPtr, location, false);
                 }
         }
         this.executing = false;
@@ -146,23 +148,32 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
      * newer ones.
      */
 
-    // preciseGranted means we have FINE permission. Only then is a new fix fast enough to wait for.
-    public boolean requestSingleLocation(LocationManager manager, boolean preciseGranted) {
+    // preciseGranted means we have FINE permission. Only then is a new one fast enough to wait for.
+    // maxCachedAgeMillis comes from the Rust side, which owns that policy for every platform.
+    public boolean requestSingleLocation(
+            LocationManager manager, boolean preciseGranted, long maxCachedAgeMillis) {
         cancelGrace();
         cancelGiveUp();
         lastDeliveredTime = -1L;
         fallback = bestLastKnown(manager);
+        if (fallback != null) {
+            // Drop it if it's too old, or dated in the future because the clock moved.
+            long cachedAge = System.currentTimeMillis() - fallback.getTime();
+            if (cachedAge < 0L || cachedAge > maxCachedAgeMillis) {
+                fallback = null;
+            }
+        }
 
         boolean started;
         try {
-            started = startFreshFix(manager, preciseGranted);
+            started = startFreshLocation(manager, preciseGranted);
         } catch (RuntimeException ignored) {
-            started = false; // e.g. permission got revoked mid-call; we'll fall back to the cached fix
+            started = false; // e.g. permission got revoked mid-call; we'll fall back to the cached one
         }
 
         if (fallback != null) {
-            // Show the cached fix right away if it's recent, there's no new request coming, or we
-            // only have coarse permission. Otherwise wait a moment to see if a new one beats it.
+            // Show the cached location right away if it's recent, there's no new request coming,
+            // or we only have coarse permission. Otherwise wait a bit to see if a new one beats it.
             long age = System.currentTimeMillis() - fallback.getTime();
             boolean showNow = !started || !preciseGranted || age < FRESH_ENOUGH_MILLIS;
             scheduleGrace(showNow ? 0L : GRACE_MILLIS);
@@ -176,8 +187,8 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
         return started || fallback != null;
     }
 
-    // Kick off a request for a new fix, trying the newest API first. Returns false if no provider is on.
-    private boolean startFreshFix(LocationManager manager, boolean preciseGranted) {
+    // Kick off a request for a new location, trying the newest API first. Returns false if no provider is on.
+    private boolean startFreshLocation(LocationManager manager, boolean preciseGranted) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             getCurrentLocation(manager, LocationManager.FUSED_PROVIDER); // API 31+
             return true;
@@ -189,13 +200,13 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getCurrentLocation(manager, provider); // API 30
         } else {
-            oneShotMode = true; // on 26-29 the fix arrives via onLocationChanged, which finishes the request
+            oneShotMode = true; // on 26-29 it arrives via onLocationChanged, which finishes the request
             manager.requestSingleUpdate(provider, this, Looper.getMainLooper());
         }
         return true;
     }
 
-    // The most recent cached fix from any provider (null if there's none). FUSED_PROVIDER only exists on API 31+.
+    // The most recent cached location from any provider (null if there's none). FUSED_PROVIDER only exists on API 31+.
     private static Location bestLastKnown(LocationManager manager) {
         String[] providers = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                 ? new String[] { LocationManager.FUSED_PROVIDER, LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER }
@@ -211,7 +222,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
         return best;
     }
 
-    // After a delay, hand back the cached fix — unless a new one shows up first and cancels this.
+    // After a delay, hand back the cached location — unless a new one arrives and cancels this.
     private void scheduleGrace(long delayMillis) {
         cancelGrace();
         gracePending = true;
@@ -221,7 +232,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
                 return;
             }
             gracePending = false;
-            deliverIfNewer(fallback);
+            deliverIfNewer(fallback, true);
         };
         handler.postDelayed(graceRunnable, delayMillis);
     }
@@ -235,7 +246,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
         }
     }
 
-    // Last resort if the new fix takes too long: stop listening and finish with the cached fix, or an error.
+    // Last resort if the new location takes too long: stop listening and finish with the cached one, or an error.
     private void scheduleGiveUp(LocationManager manager, long delayMillis) {
         cancelGiveUp();
         giveUpPending = true;

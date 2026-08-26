@@ -3,6 +3,18 @@
 A Rust library to access system-provided location/GPS data across Linux, Android, iOS, macOS, and
 Windows.
 
+## Location "freshness": cached vs live locations
+
+The `update_once()` function will typically invoke your handler callback twice:
+1. First, it'll provide a cached location that the OS already had, if one was available.
+2. Then, it'll provide a new fresh location value that was just obtained.
+
+To know which type of location value you got, use `Location::freshness()` or `is_cached()` for short.
+
+* A cached location is never more than one hour old, on any platform. 
+* `Location::time()` tells you how old it is. Every platform reports that as the same type of time value, the wall-clock UTC since the Unix epoch.
+
+
 ## Usage on Linux
 
 Linux picks one of two paths automatically, and needs no setup from you:
