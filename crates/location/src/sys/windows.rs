@@ -13,7 +13,7 @@ use windows::{
 };
 
 use crate::{
-    cached_fix_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
+    cached_location_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
     MAX_CACHED_AGE,
 };
 
@@ -212,7 +212,7 @@ impl Location<'_> {
 ///
 /// `DateTime` is just an `i64` count of 100ns ticks since 1601-01-01 UTC (the `FILETIME` epoch,
 /// not the `SYSTEMTIME` struct), so all we do is move it onto the Unix epoch.
-/// Returns `None` if that doesn't fit in a `SystemTime`, which shouldn't happen for a real fix.
+/// Returns `None` if that doesn't fit in a `SystemTime`, which shouldn't happen for a real one.
 fn system_time_from_winrt(universal_time: i64) -> Option<SystemTime> {
     /// Ticks between 1601-01-01 and 1970-01-01.
     const UNIX_EPOCH_TICKS: i64 = 11_644_473_600 * TICKS_PER_SEC;
@@ -229,7 +229,7 @@ fn system_time_from_winrt(universal_time: i64) -> Option<SystemTime> {
     if ticks >= 0 {
         UNIX_EPOCH.checked_add(delta)
     } else {
-        // A fix from before 1970 is nonsense, but the arithmetic is well-defined, so allow it.
+        // A location from before 1970 is nonsense, but the arithmetic is well-defined, so allow it.
         UNIX_EPOCH.checked_sub(delta)
     }
 }
@@ -244,7 +244,7 @@ fn get_location(geolocator: &Geolocator) -> Result<crate::Location<'_>> {
     })
 }
 
-// A recently-cached fix, returned near-instantly (short timeout = don't acquire a new one).
+// A recently-cached location, returned near-instantly (short timeout = don't acquire a new one).
 fn get_cached_location(geolocator: &Geolocator) -> Result<crate::Location<'_>> {
     // Ask WinRT for the same bound we enforce ourselves. It can still hand back something older,
     // since it uses whichever is larger of this and an age derived from the accuracy setting.
@@ -258,8 +258,8 @@ fn get_cached_location(geolocator: &Geolocator) -> Result<crate::Location<'_>> {
         freshness: Freshness::Cached,
         _phantom_data: PhantomData,
     };
-    // So check the age ourselves, and drop it rather than pass off an ancient fix as current.
-    if !cached_fix_is_recent(location.time().ok()) {
+    // So check the age ourselves, and drop it rather than pass off an ancient one as current.
+    if !cached_location_is_recent(location.time().ok()) {
         return Err(Error::TemporarilyUnavailable);
     }
     Ok(crate::Location { inner: location })

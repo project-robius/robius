@@ -9,7 +9,7 @@ use objc2_core_location::{
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 
 use super::{location_time, Location};
-use crate::{cached_fix_is_recent, Error, Freshness, Handler};
+use crate::{cached_location_is_recent, Error, Freshness, Handler};
 
 type InnerHandler = dyn Handler;
 
@@ -25,7 +25,7 @@ pub(super) struct Ivars {
     handler: Box<InnerHandler>,
     // Only ever touched on the main thread (the delegate is `MainThreadOnly`).
     pending: Cell<Pending>,
-    // While `one_shot`, deliver only fixes newer than `last_delivered` (never go backwards).
+    // While `one_shot`, deliver only locations newer than `last_delivered` (never go backwards).
     one_shot: Cell<bool>,
     last_delivered: Cell<f64>,
 }
@@ -52,7 +52,7 @@ define_class!(
                 if one_shot {
                     self.deliver_if_newer(&location, Freshness::Live);
                 } else {
-                    // continuous updates: just pass every fix along
+                    // continuous updates: just pass every location along
                     self.deliver(&location, Freshness::Live);
                 }
             }
@@ -61,7 +61,7 @@ define_class!(
         #[unsafe(method(locationManager:didFailWithError:))]
         #[allow(non_snake_case)]
         unsafe fn locationManager_didFailWithError(&self, _: &CLLocationManager, error: &NSError) {
-            // In a one-shot that already delivered a cached fix, don't overwrite it with an error.
+            // If a one-shot already delivered a cached location, don't replace it with an error.
             if self.ivars().one_shot.get() && self.ivars().last_delivered.get().is_finite() {
                 return;
             }
@@ -106,7 +106,7 @@ impl RobiusLocationDelegate {
         });
     }
 
-    /// Delivers only if newer than the last fix this one-shot, so it never jumps backwards.
+    /// Delivers only if newer than the last one this one-shot sent, so it never goes backwards.
     fn deliver_if_newer(&self, location: &CLLocation, freshness: Freshness) {
         let ts = unsafe { location.timestamp().timeIntervalSince1970() };
         if ts <= self.ivars().last_delivered.get() {
@@ -116,20 +116,20 @@ impl RobiusLocationDelegate {
         self.deliver(location, freshness);
     }
 
-    /// Begins a one-shot: resets the guard and delivers the cached fix first, before `requestLocation` refines.
+    /// Begins a one-shot: resets the guard and delivers the cached location first, before `requestLocation` refines.
     pub(super) fn begin_one_shot(&self, manager: &CLLocationManager) {
         self.ivars().last_delivered.set(f64::NEG_INFINITY);
         self.ivars().one_shot.set(true);
         if let Some(location) = unsafe { manager.location() } {
-            // Skip a stale cached fix and just wait for the real one. Leaving `last_delivered` at
-            // -inf also keeps `didFailWithError` reporting, so the request can't end silently.
-            if cached_fix_is_recent(location_time(&location)) {
+            // Skip a stale cached location and just wait for the real one. Leaving `last_delivered`
+            // at -inf also keeps `didFailWithError` reporting, so the request can't end silently.
+            if cached_location_is_recent(location_time(&location)) {
                 self.deliver_if_newer(&location, Freshness::Cached);
             }
         }
     }
 
-    /// Start continuous updates; from here we just pass every fix along.
+    /// Start continuous updates; from here we just pass every location along.
     pub(super) fn begin_continuous(&self) {
         self.ivars().one_shot.set(false);
     }

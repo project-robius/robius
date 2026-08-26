@@ -46,22 +46,22 @@ use std::time::{Duration, SystemTime};
 
 pub use crate::error::{Error, Result};
 
-/// How old a cached fix may be before we drop it instead of handing it over.
+/// How old a cached location may be before we drop it instead of handing it over.
 ///
-/// Every backend uses this same bound, so a [`Freshness::Cached`] fix means the same thing
-/// everywhere. Deliberately generous: a cached fix is only ever the first of two deliveries, and
-/// dropping it just costs the caller the instant answer they would otherwise have had.
+/// Every backend uses this same bound, so a [`Freshness::Cached`] location means the same thing
+/// everywhere. Deliberately generous: a cached location is only ever the first of two deliveries,
+/// and dropping it just costs the caller the instant answer they would otherwise have had.
 // The allow here and on the check below is for platforms with no backend, which use neither.
 #[allow(dead_code)]
 pub(crate) const MAX_CACHED_AGE: Duration = Duration::from_secs(60 * 60);
 
-/// Whether a cached fix is recent enough to bother delivering.
+/// Whether a cached location is recent enough to bother delivering.
 ///
-/// A fix we can't date is rejected, and so is one dated in the future — if we can't tell how old it
+/// One we can't date is rejected, and so is one dated in the future — if we can't tell how old it
 /// is, we don't hand it back as if it were current. This only ever gates the cached shortcut; a live
-/// fix is delivered whatever its timestamp says.
+/// location is delivered whatever its timestamp says.
 #[allow(dead_code)]
-pub(crate) fn cached_fix_is_recent(time: Option<SystemTime>) -> bool {
+pub(crate) fn cached_location_is_recent(time: Option<SystemTime>) -> bool {
     time.and_then(|time| SystemTime::now().duration_since(time).ok())
         .is_some_and(|age| age <= MAX_CACHED_AGE)
 }
@@ -127,7 +127,7 @@ impl Manager {
         self.inner.request_authorization(access, accuracy)
     }
 
-    /// Requests the device's current location, delivered to the handler. May deliver a cached fix
+    /// Requests the device's current location, delivered to the handler. May deliver a cached one
     /// immediately, then a fresher one once acquired; [`Location::freshness`] says which is which.
     /// On Linux, gives up after 60 seconds with [`Error::TemporarilyUnavailable`] if nothing
     /// arrives.
@@ -197,7 +197,7 @@ impl Location<'_> {
         self.inner.time()
     }
 
-    /// Whether the OS had this fix on hand already, or measured it for this request.
+    /// Whether the OS had this location on hand already, or measured it for this request.
     pub fn freshness(&self) -> Freshness {
         self.inner.freshness()
     }
@@ -208,25 +208,25 @@ impl Location<'_> {
     }
 }
 
-/// Where a fix came from.
+/// Where a location came from.
 ///
-/// [`Manager::update_once`] hands back whatever the OS already had before it hands back the fix it
+/// [`Manager::update_once`] hands back whatever the OS already had before it hands back the one it
 /// goes on to acquire, so one request can reach the handler twice. This is how you tell the two
 /// apart — ignore the cached one if you only want a real measurement, or take it and stop if you
 /// wanted an answer fast.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Freshness {
-    /// A fix the OS already had, handed back right away without measuring anything.
+    /// A location the OS already had, handed back right away without measuring anything.
     ///
     /// Never more than an hour old, on every platform; call [`Location::time`] if you need to know
-    /// how old exactly. A [`Freshness::Live`] fix usually follows, but if the OS never manages one,
-    /// a one-shot can end here without an error.
+    /// how old exactly. A [`Freshness::Live`] location usually follows, but if the OS never manages
+    /// one, a one-shot can end here without an error.
     Cached,
-    /// A fix the OS went and got for this request. Everything from [`Manager::start_updates`] is
-    /// one too.
+    /// A location the OS went and got for this request. Everything from [`Manager::start_updates`]
+    /// is one too.
     ///
-    /// What makes it live is that we asked for a new fix, not that a sensor definitely ran — some
-    /// platforms will answer a request like that from a very recent fix of their own.
+    /// What makes it live is that we asked for a new one, not that a sensor definitely ran — some
+    /// platforms will answer a request like that from a very recent location of their own.
     Live,
 }
 
@@ -265,25 +265,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recent_cached_fixes_are_usable() {
-        assert!(cached_fix_is_recent(Some(SystemTime::now())));
-        assert!(cached_fix_is_recent(Some(
+    fn recent_cached_locations_are_usable() {
+        assert!(cached_location_is_recent(Some(SystemTime::now())));
+        assert!(cached_location_is_recent(Some(
             SystemTime::now() - Duration::from_secs(30)
         )));
-        assert!(cached_fix_is_recent(Some(
+        assert!(cached_location_is_recent(Some(
             SystemTime::now() - MAX_CACHED_AGE + Duration::from_secs(60)
         )));
     }
 
     #[test]
-    fn stale_undated_and_future_fixes_are_not() {
-        assert!(!cached_fix_is_recent(Some(
+    fn stale_undated_and_future_locations_are_not() {
+        assert!(!cached_location_is_recent(Some(
             SystemTime::now() - MAX_CACHED_AGE - Duration::from_secs(1)
         )));
         // No timestamp means we can't tell how old it is, so we don't pass it off as current.
-        assert!(!cached_fix_is_recent(None));
-        // Neither is a fix from the future, which means the clock moved under us.
-        assert!(!cached_fix_is_recent(Some(
+        assert!(!cached_location_is_recent(None));
+        // Neither is one from the future, which means the clock moved under us.
+        assert!(!cached_location_is_recent(Some(
             SystemTime::now() + Duration::from_secs(60)
         )));
     }

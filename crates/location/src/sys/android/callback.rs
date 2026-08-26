@@ -60,8 +60,8 @@ unsafe extern "C" fn rust_callback<'a>(
 }
 
 fn deliver_location(env: JNIEnv<'_>, shared: &Shared, location: JObject<'_>, freshness: Freshness) {
-    // `getCurrentLocation` delivers `null` when it can't get a fresh fix; fall back to the last
-    // known location before giving up.
+    // `getCurrentLocation` delivers `null` when it can't get a fresh location; fall back to the
+    // last known one before giving up.
     if location.as_raw().is_null() {
         super::deliver_last_known_or_error(shared);
         return;

@@ -18,7 +18,7 @@ use jni::{
 };
 
 use crate::{
-    cached_fix_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
+    cached_location_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
     MAX_CACHED_AGE,
 };
 
@@ -282,12 +282,12 @@ pub(super) fn handle_permission_result(shared: &Shared, granted: bool) {
 
 fn run_update_once(env: &mut JNIEnv, context: &JObject, shared: &Shared) -> Result<()> {
     let manager = get_location_manager(env, context)?;
-    // With fine permission the Java side can wait a moment for a new fix; coarse is too slow for that.
+    // With fine permission the Java side can wait a moment for a new location; coarse is too slow for that.
     let precise = has_permission(env, context, FINE_LOCATION_PERMISSION)?;
     let callback = location_callback(shared);
 
     // The Java side picks the newest available API for this device (see `LocationCallback.java`).
-    // It also drops a cached fix older than `MAX_CACHED_AGE`, which we own so every platform agrees.
+    // It also drops a cached location older than `MAX_CACHED_AGE`, which we own so every platform agrees.
     let started = env
         .call_method(
             callback,
@@ -369,9 +369,9 @@ pub(super) fn deliver_last_known_or_error(shared: &Shared) {
                 phantom: PhantomData,
             },
         };
-        // Same staleness bound as everywhere else. This is the request's last word, so if the fix
-        // is too old to hand over, the caller gets an error rather than silence.
-        if cached_fix_is_recent(location.time().ok()) {
+        // Same staleness bound as everywhere else. This is the request's last word, so if it is
+        // too old to hand over, the caller gets an error rather than silence.
+        if cached_location_is_recent(location.time().ok()) {
             shared.handler.handle(location);
             return;
         }
@@ -617,7 +617,7 @@ impl Location<'_> {
                 .call_method(&self.inner, "getTime", "()J", &[])
                 .map_err(|e| map_android_error(env, e))?
                 .j()?;
-            // Negative means before 1970, which is nonsense for a fix but mustn't blow up.
+            // Negative means before 1970, which is nonsense for a location but mustn't blow up.
             let delta = Duration::from_millis(millis.unsigned_abs());
             if millis >= 0 {
                 SystemTime::UNIX_EPOCH.checked_add(delta)

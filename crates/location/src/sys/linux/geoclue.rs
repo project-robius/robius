@@ -26,7 +26,7 @@ use super::{
     lock, one_shot_is_fresher, parse_location, validate_desktop_id, CallbackSender, LocationData,
     OneShot, ONE_SHOT_TIMEOUT,
 };
-use crate::{cached_fix_is_recent, Access, Accuracy, Error, Result};
+use crate::{cached_location_is_recent, Access, Accuracy, Error, Result};
 
 const GEOCLUE_DESTINATION: &str = "org.freedesktop.GeoClue2";
 const GEOCLUE_NAMESPACE: &str = "/org/freedesktop/GeoClue2";
@@ -200,7 +200,7 @@ impl Manager {
         };
 
         if accuracy_changed {
-            // Invalidate old-accuracy callbacks before teardown can block. If a queued one-shot fix
+            // Invalidate old-accuracy callbacks before teardown can block. If a queued one-shot
             // is cancelled, preserve that intent for the newly configured client.
             {
                 let mut state = self.state();
@@ -284,7 +284,7 @@ impl Manager {
             state
                 .last_location
                 .as_ref()
-                .filter(|location| cached_fix_is_recent(location.time))
+                .filter(|location| cached_location_is_recent(location.time))
                 .map(LocationData::as_cached)
         } else {
             None
@@ -644,8 +644,8 @@ fn stop_client(shared: &Shared) -> Result<()> {
         .and_then(|proxy| proxy.call::<_, _, ()>("Stop", &()));
     match result {
         Ok(()) => Ok(()),
-        // The client vanished underneath us. Forget it (and the fix it produced, which belonged to
-        // its authorization) so the next request transparently acquires a fresh one.
+        // The client vanished underneath us. Forget it (and the location it produced, which
+        // belonged to its authorization) so the next request transparently acquires a fresh one.
         Err(error) if is_gone_error(&error) => {
             let mut state = lock(&shared.state);
             if client_is_current(&state, &client) {
@@ -1201,7 +1201,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_one_shot_only_delivers_a_newer_provider_fix() {
+    fn cached_one_shot_only_delivers_a_newer_provider_location() {
         let old = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
         let one_shot = OneShot {
             deadline: Instant::now() + ONE_SHOT_TIMEOUT,

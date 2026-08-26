@@ -31,7 +31,7 @@ use zbus::{
 };
 
 use crate::{
-    cached_fix_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
+    cached_location_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
 };
 
 const PORTAL_DESTINATION: &str = "org.freedesktop.portal.Desktop";
@@ -339,7 +339,7 @@ fn run_backend(
             return;
         }
         // Rebuild a failed-closed backend (provider crash, upgrade, restart) so `TemporarilyUnavailable`
-        // actually means temporary. Starts from scratch: no cached fix, session, or authorization.
+        // actually means temporary. Starts fresh: no cached location, session, or authorization.
         if !matches!(command, Command::Shutdown(_)) && !backend.is_usable() {
             // Kill off the dead backend's senders before the replacement restarts generations at zero.
             callbacks.retire_senders();
@@ -480,7 +480,7 @@ impl CallbackDispatcher {
     /// Makes every sender handed out so far inert.
     ///
     /// Otherwise a dead backend's listener could call `advance_generation` after the new one restarts
-    /// at zero, pinning `accepted_generation` to a dead chain and silently dropping every later fix.
+    /// at zero, pinning `accepted_generation` to a dead chain and silently dropping every later one.
     /// Queued locations go too (wrong authorization), but errors stay, since the app needs those.
     fn retire_senders(&self) {
         let mut queue = lock(&self.shared.queue);
@@ -528,7 +528,7 @@ impl CallbackSender {
         self.enqueue(CallbackEvent::Error(error));
     }
 
-    /// Drops fixes from an old accuracy request. Returns true if one of them was the pending
+    /// Drops locations from an old accuracy request. Returns true if one of them was the pending
     /// `update_once` result, so the backend knows to keep waiting for a fresh one.
     pub(super) fn advance_generation(&self, generation: u64) -> bool {
         let mut queue = lock(&self.shared.queue);
@@ -560,7 +560,7 @@ impl CallbackSender {
         discarded_one_shot
     }
 
-    /// Suppresses fixes that were queued solely for a continuous stream. A fix that also completed
+    /// Suppresses locations queued solely for a continuous stream. One that also completed
     /// `update_once` remains deliverable; stopping one mode must not cancel the other.
     pub(super) fn discard_continuous_locations(&self) {
         let mut queue = lock(&self.shared.queue);
@@ -591,7 +591,7 @@ impl CallbackSender {
         if queue.shutdown {
             return;
         }
-        // A retired backend's fixes are from a session whose authorization no longer applies. Errors are
+        // A retired backend's locations are from a session whose authorization no longer applies. Errors are
         // exempt: `fail_closed` clears `available` first, so fencing them could swallow the only notice.
         if queue.epoch != self.epoch && matches!(event, CallbackEvent::Location { .. }) {
             return;
@@ -612,7 +612,7 @@ impl CallbackSender {
             }
         }
 
-        // Providers can outpace app code, so coalesce adjacent fixes and keep the newest.
+        // Providers can outpace app code, so coalesce adjacent locations and keep the newest.
         let coalesced = if let (
             CallbackEvent::Location {
                 location,
@@ -627,8 +627,8 @@ impl CallbackSender {
         ) = (&event, queue.events.back_mut())
         {
             if generation == queued_generation {
-                // Keep only the newest adjacent fix, but preserve the fact that an older fix had
-                // completed a one-shot request.
+                // Keep only the newest adjacent location, but preserve the fact that an older one
+                // had completed a one-shot request.
                 let keep_protected_newer = *queued_one_shot
                     && !*one_shot
                     && queued_location
@@ -650,10 +650,10 @@ impl CallbackSender {
             return;
         }
         // Belt-and-braces bound; we can't actually get here (same-generation locations coalesce, errors
-        // dedup by kind). Here so a future change degrades by dropping a fix instead of growing forever.
+        // dedup by kind). Here so a future change degrades by dropping one instead of growing forever.
         if queue.events.len() >= CALLBACK_QUEUE_CAPACITY {
-            // Never evict a one-shot result, since nothing will resend it. Continuous fixes and
-            // errors are fine to drop.
+            // Never evict a one-shot result, since nothing will resend it. Continuous locations
+            // and errors are fine to drop.
             if let Some(position) = queue.events.iter().position(|queued| {
                 matches!(
                     queued,
@@ -920,7 +920,7 @@ enum SessionPhase {
 struct OneShot {
     deadline: Instant,
     delivered_cached: bool,
-    /// A cached fix already delivered by this request. A portal update with an
+    /// A cached location already delivered by this request. A portal update with an
     /// equal or older timestamp completes the request but is not delivered twice.
     newer_than: Option<SystemTime>,
 }
@@ -965,7 +965,7 @@ pub(super) struct LocationData {
 }
 
 impl LocationData {
-    /// The same fix, marked as a replay of one we already had rather than a new measurement.
+    /// The same location, marked as a replay of one we already had rather than a new measurement.
     fn as_cached(&self) -> Self {
         Self {
             freshness: Freshness::Cached,
@@ -1076,7 +1076,7 @@ impl PortalManager {
             let accuracy_changed = portal_accuracy(state.accuracy) != portal_accuracy(accuracy);
             state.accuracy = accuracy;
             if accuracy_changed {
-                // Never replay a fix obtained under a different privacy/precision request.
+                // Never replay a location obtained under a different privacy/precision request.
                 state.last_location = None;
                 state.callback_generation = state.callback_generation.wrapping_add(1);
                 let discarded_one_shot = self
@@ -1146,7 +1146,7 @@ impl PortalManager {
             return Err(error);
         }
 
-        // Reuse only a fix acquired by this same already-authorized portal session. A newly
+        // Reuse only a location acquired by this same already-authorized portal session. A newly
         // starting session must first receive its permission response and a provider update.
         let mut state = self.state();
         let session_active = portal_session_is_active(&state, None);
@@ -1155,7 +1155,7 @@ impl PortalManager {
                 state
                     .last_location
                     .as_ref()
-                    .filter(|location| cached_fix_is_recent(location.time))
+                    .filter(|location| cached_location_is_recent(location.time))
                     .map(LocationData::as_cached)
             })
             .flatten();
@@ -1272,14 +1272,14 @@ impl PortalManager {
 
         let accuracy = self.state().accuracy;
         // Cached locations are scoped to the session that acquired them. A future authorization
-        // may grant less accuracy or be denied, so never carry a fix across a session boundary.
+        // may grant less accuracy or be denied, so never carry one across a session boundary.
         self.state().last_location = None;
         let session_token = self.next_portal_token("session")?;
         let mut options = HashMap::new();
         options.insert("session_handle_token", Value::from(session_token.as_str()));
         options.insert("accuracy", Value::from(portal_accuracy(accuracy)));
         // Zero thresholds ask the portal to forward every provider update. This is important for
-        // both a prompt one-shot fix and true continuous updates.
+        // both a prompt one-shot location and true continuous updates.
         options.insert("distance-threshold", Value::from(0_u32));
         options.insert("time-threshold", Value::from(0_u32));
 
@@ -2260,10 +2260,10 @@ mod tests {
     }
 
     #[test]
-    fn replaying_a_stored_fix_marks_it_cached() {
+    fn replaying_a_stored_location_marks_it_cached() {
         let stored = test_location(1.0);
         assert_eq!(stored.as_cached().freshness, Freshness::Cached);
-        // The stored copy is untouched, so a later provider update is still a live fix.
+        // The stored copy is untouched, so a later provider update is still a live location.
         assert_eq!(stored.freshness, Freshness::Live);
     }
 
@@ -2457,7 +2457,7 @@ mod tests {
     }
 
     #[test]
-    fn older_continuous_fix_does_not_replace_a_protected_one_shot() {
+    fn older_continuous_location_does_not_replace_a_protected_one_shot() {
         let (sender, shared) = test_callback_sender();
         let mut newer = test_location(1.0);
         newer.time = Some(SystemTime::UNIX_EPOCH + Duration::from_secs(200));
@@ -2504,7 +2504,7 @@ mod tests {
     }
 
     #[test]
-    fn advancing_callback_generation_cancels_and_rejects_stale_fixes() {
+    fn advancing_callback_generation_cancels_and_rejects_stale_locations() {
         let (sender, shared) = test_callback_sender();
         sender.location(test_location(1.0), false, 0);
         sender.error(Error::Network);
@@ -2795,7 +2795,7 @@ mod tests {
             &one_shot,
             Some(previous + Duration::from_micros(1))
         ));
-        // If a provider omits timestamps, it is safer to deliver the fix than silently discard it.
+        // If a provider omits timestamps, it is safer to deliver it than silently discard it.
         assert!(one_shot_is_fresher(&one_shot, None));
         assert!(one_shot_is_fresher(
             &OneShot {

@@ -57,7 +57,7 @@ impl Manager {
         if self.undetermined() && can_request_location_authorization() {
             self.delegate.defer_update_once();
         } else {
-            self.delegate.begin_one_shot(&self.inner); // deliver the cached fix first, then refine
+            self.delegate.begin_one_shot(&self.inner); // deliver the cached one first, then refine
             unsafe { self.inner.requestLocation() };
         }
         Ok(())
