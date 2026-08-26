@@ -8,8 +8,8 @@ use objc2_core_location::{
 };
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 
-use super::Location;
-use crate::{Error, Handler};
+use super::{location_time, Location};
+use crate::{cached_fix_is_recent, Error, Freshness, Handler};
 
 type InnerHandler = dyn Handler;
 
@@ -50,9 +50,10 @@ define_class!(
             let one_shot = self.ivars().one_shot.get();
             for location in locations.iter() {
                 if one_shot {
-                    self.deliver_if_newer(&location);
+                    self.deliver_if_newer(&location, Freshness::Live);
                 } else {
-                    self.deliver(&location); // continuous updates: just pass every fix along
+                    // continuous updates: just pass every fix along
+                    self.deliver(&location, Freshness::Live);
                 }
             }
         }
@@ -99,18 +100,20 @@ impl RobiusLocationDelegate {
         unsafe { msg_send![super(this), init] }
     }
 
-    fn deliver(&self, location: &CLLocation) {
-        self.ivars().handler.handle(crate::Location { inner: Location { inner: location } });
+    fn deliver(&self, location: &CLLocation, freshness: Freshness) {
+        self.ivars().handler.handle(crate::Location {
+            inner: Location::new(location, freshness),
+        });
     }
 
     /// Delivers only if newer than the last fix this one-shot, so it never jumps backwards.
-    fn deliver_if_newer(&self, location: &CLLocation) {
+    fn deliver_if_newer(&self, location: &CLLocation, freshness: Freshness) {
         let ts = unsafe { location.timestamp().timeIntervalSince1970() };
         if ts <= self.ivars().last_delivered.get() {
             return;
         }
         self.ivars().last_delivered.set(ts);
-        self.deliver(location);
+        self.deliver(location, freshness);
     }
 
     /// Begins a one-shot: resets the guard and delivers the cached fix first, before `requestLocation` refines.
@@ -118,7 +121,11 @@ impl RobiusLocationDelegate {
         self.ivars().last_delivered.set(f64::NEG_INFINITY);
         self.ivars().one_shot.set(true);
         if let Some(location) = unsafe { manager.location() } {
-            self.deliver_if_newer(&location);
+            // Skip a stale cached fix and just wait for the real one. Leaving `last_delivered` at
+            // -inf also keeps `didFailWithError` reporting, so the request can't end silently.
+            if cached_fix_is_recent(location_time(&location)) {
+                self.deliver_if_newer(&location, Freshness::Cached);
+            }
         }
     }
 

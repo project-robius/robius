@@ -3,6 +3,19 @@
 A Rust library to access system-provided location/GPS data across Linux, Android, iOS, macOS, and
 Windows.
 
+## Cached and live fixes
+
+`update_once()` usually calls your handler twice: first with whatever fix the OS already had lying
+around, then with the one it goes on to actually measure. `Location::freshness()` tells you which of
+the two you're looking at, and `is_cached()` is the shorthand for the first.
+
+A cached fix is never more than an hour old on any platform. Anything older gets dropped and you just
+wait for the real one. `Location::time()` says exactly how old it is; every platform reports that as
+wall-clock UTC counted from the Unix epoch, so the number means the same thing everywhere.
+
+So ignore the cached fixes if you only want real measurements. Just know that if the OS never manages
+to get one, a single request can end on the cached fix without an error.
+
 ## Usage on Linux
 
 Linux picks one of two paths automatically, and needs no setup from you:

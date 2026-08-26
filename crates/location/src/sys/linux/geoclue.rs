@@ -23,10 +23,10 @@ use zbus::{
 // Shared with the portal backend so the two paths cannot silently drift apart. Anything defined
 // locally below is deliberately GeoClue-specific and is named accordingly.
 use super::{
-    is_recent, lock, one_shot_is_fresher, parse_location, validate_desktop_id, CallbackSender,
-    LocationData, OneShot, ONE_SHOT_TIMEOUT,
+    lock, one_shot_is_fresher, parse_location, validate_desktop_id, CallbackSender, LocationData,
+    OneShot, ONE_SHOT_TIMEOUT,
 };
-use crate::{Access, Accuracy, Error, Result};
+use crate::{cached_fix_is_recent, Access, Accuracy, Error, Result};
 
 const GEOCLUE_DESTINATION: &str = "org.freedesktop.GeoClue2";
 const GEOCLUE_NAMESPACE: &str = "/org/freedesktop/GeoClue2";
@@ -284,8 +284,8 @@ impl Manager {
             state
                 .last_location
                 .as_ref()
-                .filter(|location| is_recent(location.time))
-                .cloned()
+                .filter(|location| cached_fix_is_recent(location.time))
+                .map(LocationData::as_cached)
         } else {
             None
         };
@@ -1192,23 +1192,12 @@ fn is_definitive_start_error(error: &zbus::Error) -> bool {
 mod tests {
     use std::time::SystemTime;
 
-    use super::{super::MAX_CACHED_AGE, *};
+    use super::*;
 
     #[test]
     fn accuracy_maps_to_geoclue_levels() {
         assert_eq!(geoclue_accuracy(Accuracy::Approximate), GEOCLUE_ACCURACY_CITY);
         assert_eq!(geoclue_accuracy(Accuracy::Precise), GEOCLUE_ACCURACY_EXACT);
-    }
-
-    #[test]
-    fn cache_rejects_future_and_stale_fixes() {
-        let now = SystemTime::now();
-        assert!(is_recent(Some(now - Duration::from_secs(30))));
-        assert!(!is_recent(Some(
-            now - MAX_CACHED_AGE - Duration::from_secs(1)
-        )));
-        assert!(!is_recent(Some(now + Duration::from_secs(1))));
-        assert!(!is_recent(None));
     }
 
     #[test]

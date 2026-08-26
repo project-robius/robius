@@ -30,7 +30,9 @@ use zbus::{
     MatchRule,
 };
 
-use crate::{Access, Accuracy, Coordinates, Error, Handler, Result};
+use crate::{
+    cached_fix_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
+};
 
 const PORTAL_DESTINATION: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
@@ -43,7 +45,6 @@ const DBUS_INTERFACE: &str = "org.freedesktop.DBus";
 const METHOD_TIMEOUT: Duration = Duration::from_secs(30);
 const CONSTRUCTOR_TIMEOUT: Duration = Duration::from_secs(45);
 const ONE_SHOT_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_CACHED_AGE: Duration = Duration::from_secs(60 * 60);
 const CALLBACK_QUEUE_CAPACITY: usize = 64;
 
 // Values from the version-1 XDG Location portal specification.
@@ -960,6 +961,17 @@ pub(super) struct LocationData {
     bearing: Option<f64>,
     speed: Option<f64>,
     time: Option<SystemTime>,
+    freshness: Freshness,
+}
+
+impl LocationData {
+    /// The same fix, marked as a replay of one we already had rather than a new measurement.
+    fn as_cached(&self) -> Self {
+        Self {
+            freshness: Freshness::Cached,
+            ..self.clone()
+        }
+    }
 }
 
 impl PortalManager {
@@ -1143,8 +1155,8 @@ impl PortalManager {
                 state
                     .last_location
                     .as_ref()
-                    .filter(|location| is_recent(location.time))
-                    .cloned()
+                    .filter(|location| cached_fix_is_recent(location.time))
+                    .map(LocationData::as_cached)
             })
             .flatten();
 
@@ -1440,6 +1452,10 @@ impl Location<'_> {
 
     pub fn time(&self) -> Result<SystemTime> {
         self.inner.time.ok_or(Error::TemporarilyUnavailable)
+    }
+
+    pub fn freshness(&self) -> Freshness {
+        self.inner.freshness
     }
 }
 
@@ -1865,6 +1881,7 @@ fn parse_location(values: &HashMap<String, OwnedValue>) -> Result<LocationData> 
         bearing,
         speed,
         time,
+        freshness: Freshness::Live,
     })
 }
 
@@ -1878,11 +1895,6 @@ fn optional_f64(values: &HashMap<String, OwnedValue>, key: &str) -> Result<Optio
         .get(key)
         .map(|value| f64::try_from(value).map_err(|_| Error::Unknown))
         .transpose()
-}
-
-fn is_recent(time: Option<SystemTime>) -> bool {
-    time.and_then(|time| SystemTime::now().duration_since(time).ok())
-        .is_some_and(|age| age <= MAX_CACHED_AGE)
 }
 
 fn one_shot_is_fresher(one_shot: &OneShot, current: Option<SystemTime>) -> bool {
@@ -2243,7 +2255,16 @@ mod tests {
             bearing: None,
             speed: None,
             time: None,
+            freshness: Freshness::Live,
         }
+    }
+
+    #[test]
+    fn replaying_a_stored_fix_marks_it_cached() {
+        let stored = test_location(1.0);
+        assert_eq!(stored.as_cached().freshness, Freshness::Cached);
+        // The stored copy is untouched, so a later provider update is still a live fix.
+        assert_eq!(stored.freshness, Freshness::Live);
     }
 
     fn test_callback_sender() -> (CallbackSender, Arc<CallbackShared>) {
@@ -2826,18 +2847,6 @@ mod tests {
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'));
             assert!(zbus::zvariant::ObjectPath::try_from(format!("/{token}")).is_ok());
         }
-    }
-
-    #[test]
-    fn future_and_old_locations_are_not_used_as_cache() {
-        assert!(is_recent(Some(SystemTime::now())));
-        assert!(!is_recent(Some(
-            SystemTime::now() - MAX_CACHED_AGE - Duration::from_secs(1)
-        )));
-        assert!(!is_recent(Some(
-            SystemTime::now() + Duration::from_secs(60)
-        )));
-        assert!(!is_recent(None));
     }
 
     #[test]

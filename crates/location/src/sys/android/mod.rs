@@ -17,7 +17,10 @@ use jni::{
     JNIEnv,
 };
 
-use crate::{Access, Accuracy, Coordinates, Error, Handler, Result};
+use crate::{
+    cached_fix_is_recent, Access, Accuracy, Coordinates, Error, Freshness, Handler, Result,
+    MAX_CACHED_AGE,
+};
 
 const COARSE_LOCATION_PERMISSION: &str = "android.permission.ACCESS_COARSE_LOCATION";
 const FINE_LOCATION_PERMISSION: &str = "android.permission.ACCESS_FINE_LOCATION";
@@ -284,12 +287,17 @@ fn run_update_once(env: &mut JNIEnv, context: &JObject, shared: &Shared) -> Resu
     let callback = location_callback(shared);
 
     // The Java side picks the newest available API for this device (see `LocationCallback.java`).
+    // It also drops a cached fix older than `MAX_CACHED_AGE`, which we own so every platform agrees.
     let started = env
         .call_method(
             callback,
             "requestSingleLocation",
-            "(Landroid/location/LocationManager;Z)Z",
-            &[JValueGen::Object(&manager), JValueGen::Bool(precise as u8)],
+            "(Landroid/location/LocationManager;ZJ)Z",
+            &[
+                JValueGen::Object(&manager),
+                JValueGen::Bool(precise as u8),
+                JValueGen::Long(MAX_CACHED_AGE.as_millis() as i64),
+            ],
         )
         .map_err(|e| map_android_error(env, e))?
         .z()?;
@@ -353,18 +361,22 @@ pub(super) fn deliver_last_known_or_error(shared: &Shared) {
         .map_err(|_| Error::AndroidEnvironment)
         .and_then(|x| x);
 
-    match result {
-        Ok(Some(location)) => {
-            let location = crate::Location {
-                inner: Location {
-                    inner: location,
-                    phantom: PhantomData,
-                },
-            };
+    if let Ok(Some(inner)) = result {
+        let location = crate::Location {
+            inner: Location {
+                inner,
+                freshness: Freshness::Cached,
+                phantom: PhantomData,
+            },
+        };
+        // Same staleness bound as everywhere else. This is the request's last word, so if the fix
+        // is too old to hand over, the caller gets an error rather than silence.
+        if cached_fix_is_recent(location.time().ok()) {
             shared.handler.handle(location);
+            return;
         }
-        _ => shared.handler.error(Error::TemporarilyUnavailable),
     }
+    shared.handler.error(Error::TemporarilyUnavailable);
 }
 
 /// Returns the most recent cached location from any provider, if one exists.
@@ -538,6 +550,7 @@ fn construct_callback<'a>(
 // TODO: Could inner be JObject<'a>?
 pub struct Location<'a> {
     inner: GlobalRef,
+    freshness: Freshness,
     phantom: PhantomData<&'a ()>,
 }
 
@@ -604,10 +617,21 @@ impl Location<'_> {
                 .call_method(&self.inner, "getTime", "()J", &[])
                 .map_err(|e| map_android_error(env, e))?
                 .j()?;
-            Ok(SystemTime::UNIX_EPOCH + Duration::from_millis(millis as u64))
+            // Negative means before 1970, which is nonsense for a fix but mustn't blow up.
+            let delta = Duration::from_millis(millis.unsigned_abs());
+            if millis >= 0 {
+                SystemTime::UNIX_EPOCH.checked_add(delta)
+            } else {
+                SystemTime::UNIX_EPOCH.checked_sub(delta)
+            }
+            .ok_or(Error::Unknown)
         })
         .map_err(|_| Error::AndroidEnvironment)
         .and_then(|x| x)
+    }
+
+    pub fn freshness(&self) -> Freshness {
+        self.freshness
     }
 }
 

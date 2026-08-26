@@ -5,7 +5,9 @@ struct Handler;
 impl robius_location::Handler for Handler {
     fn handle(&self, location: Location<'_>) {
         println!(
-            "received location: coordinates={:?}, altitude={:?}, bearing={:?}, speed={:?}, time={:?}",
+            "received {:?} location: coordinates={:?}, altitude={:?}, bearing={:?}, speed={:?}, \
+             time={:?}",
+            location.freshness(),
             location.coordinates(),
             location.altitude(),
             location.bearing(),

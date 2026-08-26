@@ -50,7 +50,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
      * The name and signature of this function must be kept in sync with `RUST_CALLBACK_NAME`, and
      * `RUST_CALLBACK_SIGNATURE` respectively.
      */
-    private native void rustCallback(long sharedPtr, Location location);
+    private native void rustCallback(long sharedPtr, Location location, boolean cached);
 
     public LocationCallback(long sharedPtr) {
         this.sharedPtr = sharedPtr;
@@ -69,21 +69,22 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
     }
 
     // Hand a location (or null) to Rust. `executing` lets Drop wait for us instead of freeing us mid-call.
-    private void deliver(Location location) {
+    // `cached` says whether this fix was already sitting there, or the system just measured it.
+    private void deliver(Location location, boolean cached) {
         this.executing = true;
         if (!this.doNotExecute) {
-            rustCallback(this.sharedPtr, location);
+            rustCallback(this.sharedPtr, location, cached);
         }
         this.executing = false;
     }
 
     // Only hand it back if it's newer than the last one, so the location never jumps back in time.
-    private void deliverIfNewer(Location location) {
+    private void deliverIfNewer(Location location, boolean cached) {
         if (location == null || location.getTime() <= lastDeliveredTime) {
             return;
         }
         lastDeliveredTime = location.getTime();
-        deliver(location);
+        deliver(location, cached);
     }
 
     private static Location newer(Location a, Location b) {
@@ -96,9 +97,10 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
     private void resolveOneShot(Location fresh) {
         Location best = newer(fresh, fallback);
         if (best != null) {
-            deliverIfNewer(best);
+            // `best` is one of the two, so anything that isn't the new fix came out of the cache.
+            deliverIfNewer(best, best != fresh);
         } else if (lastDeliveredTime < 0L) {
-            deliver(null);
+            deliver(null, false);
         }
     }
 
@@ -115,7 +117,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
             cancelGiveUp();
             resolveOneShot(location);
         } else {
-            deliver(location); // continuous updates: just pass every fix along
+            deliver(location, false); // continuous updates: just pass every fix along
         }
     }
 
@@ -127,7 +129,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
         this.executing = true;
         if (!this.doNotExecute) {
                 for (Location location : locations) {
-                    rustCallback(this.sharedPtr, location);
+                    rustCallback(this.sharedPtr, location, false);
                 }
         }
         this.executing = false;
@@ -147,11 +149,20 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
      */
 
     // preciseGranted means we have FINE permission. Only then is a new fix fast enough to wait for.
-    public boolean requestSingleLocation(LocationManager manager, boolean preciseGranted) {
+    // maxCachedAgeMillis comes from the Rust side, which owns that policy for every platform.
+    public boolean requestSingleLocation(
+            LocationManager manager, boolean preciseGranted, long maxCachedAgeMillis) {
         cancelGrace();
         cancelGiveUp();
         lastDeliveredTime = -1L;
         fallback = bestLastKnown(manager);
+        if (fallback != null) {
+            // Drop a cached fix that's too old, or dated in the future because the clock moved.
+            long cachedAge = System.currentTimeMillis() - fallback.getTime();
+            if (cachedAge < 0L || cachedAge > maxCachedAgeMillis) {
+                fallback = null;
+            }
+        }
 
         boolean started;
         try {
@@ -221,7 +232,7 @@ public class LocationCallback implements Consumer<Location>, LocationListener {
                 return;
             }
             gracePending = false;
-            deliverIfNewer(fallback);
+            deliverIfNewer(fallback, true);
         };
         handler.postDelayed(graceRunnable, delayMillis);
     }
