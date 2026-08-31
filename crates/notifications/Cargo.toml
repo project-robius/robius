@@ -1,0 +1,147 @@
+[package]
+name = "robius-notifications"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.77.0"
+authors = [
+    "Kevin Boos <kevinaboos@gmail.com>",
+    "Project Robius Maintainers",
+]
+description = "Rust abstractions for showing system notifications and handling user interactions with them, across multiple platforms"
+documentation = "https://docs.rs/robius-notifications"
+homepage.workspace = true
+keywords = ["robius", "notification", "native", "alert", "banner"]
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+
+## Note: ideally this would be only included when we're building for Android,
+## but Cargo doesn't support target-specific build scripts yet.
+## See: <https://github.com/rust-lang/cargo/issues/4932> and
+## <https://github.com/rust-lang/cargo/issues/14378#issuecomment-2278333431>.
+[build-dependencies]
+android-build.workspace = true
+
+
+[features]
+default = ["zbus-async-io"]
+
+## Selects zbus's built-in async-io executor for the Linux backend.
+## The default; irrelevant on non-Linux platforms.
+zbus-async-io = ["zbus/async-io"]
+
+## Backs the Linux backend's D-Bus I/O with tokio instead of zbus's bundled
+## async-io executor. For an app that already depends on tokio, enabling this
+## (with `default-features = false`) drops the whole async-io dependency stack
+## from Linux builds. Irrelevant on non-Linux platforms.
+##
+## Note: zbus still drives this on its own internal runtime rather than your
+## app's, so this is purely a dependency-graph choice, not executor sharing;
+## either way the D-Bus work happens on a thread this crate owns, so calls
+## are safe from anywhere (including inside a tokio runtime).
+##
+## With `default-features = false`, exactly one of `zbus-async-io` or `tokio`
+## must be enabled, or the Linux backend won't compile.
+tokio = ["zbus/tokio"]
+
+## Enables Apple communication notifications for conversation-style notifications,
+## where it shows sender/group avatars, Siri & Focus intents, etc. on iOS 15+/macOS 12+.
+##
+## Requires your app to do the following:
+## * Declare the `com.apple.developer.usernotifications.communication` entitlement,
+## * In its Info.plist, include `INSendMessageIntent` in the `NSUserActivityTypes` array.
+##
+## If you don't specify that, they'll just show up as normal notifications.
+apple-communication = ["dep:objc2-intents", "objc2-foundation/NSData"]
+
+
+[dependencies]
+cfg-if.workspace = true
+
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+robius-android-env.workspace = true
+
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+block2.workspace = true
+## "exception" lets us survive UNUserNotificationCenter throwing in an
+## app bundle the system hasn't registered, instead of aborting the process.
+objc2 = { workspace = true, features = ["exception"] }
+objc2-intents = { workspace = true, optional = true, features = [
+    "INImage",
+    "INIntent",
+    "INIntentResponse",
+    "INInteraction",
+    "INOutgoingMessageType",
+    "INPerson",
+    "INPersonHandle",
+    "INSendMessageAttachment",
+    "INSendMessageIntent",
+    "INSpeakableString",
+    "block2",
+] }
+objc2-foundation = { workspace = true, features = [
+    "NSArray",
+    "NSBundle",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSError",
+    "NSObject",
+    "NSSet",
+    "NSString",
+    "NSURL",
+    "NSValue",
+] }
+objc2-user-notifications = { workspace = true, features = [
+    "UNError",
+    "UNNotification",
+    "UNNotificationAction",
+    "UNNotificationAttachment",
+    "UNNotificationCategory",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSettings",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+    "block2",
+] }
+
+
+[target.'cfg(target_os = "ios")'.dependencies]
+dispatch2 = { workspace = true, features = ["objc2"] }
+objc2-ui-kit = { workspace = true, features = [
+    "UIApplication",
+    "UIResponder",
+    "block2",
+] }
+
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { workspace = true, features = [
+    "NSWorkspace",
+] }
+
+
+[target.'cfg(target_os = "linux")'.dependencies]
+## The executor backend comes from this crate's `zbus-async-io` (default)
+## or `tokio` feature.
+zbus = { workspace = true, features = ["blocking-api"] }
+
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Data_Xml_Dom",
+    "Foundation",
+    "Foundation_Collections",
+    "System",
+    "UI_Notifications",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
