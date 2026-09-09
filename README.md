@@ -35,6 +35,9 @@ There's also a [status table](#crate--platform-status-table) that shows what eac
 * [`robius-share`](crates/share/): opens the native system share sheet so you can share a file or other content with a different app on your system.
   * This is implemented using `Intent.createChooser` on Android, `UIActivityViewController` on iOS, `NSSharingServicePicker` on macOS, and the WinRT Share UI on Windows.
   * Linux doesn't really have a system share sheet, so we wrote a custom XDG portal connection that still supports every possible type of share payload.
+* [`robius-speech`](crates/speech/): streams native speech-to-text results and microphone levels on macOS, iOS, Android, and Windows.
+  * Provides recording sessions with partial/final transcripts, graceful stop, and cancellation, independently of the UI toolkit.
+  * Linux doesn't offer any OS-provided speech-to-text functionality, so this crate can't do anything on Linux.
 * [`robius-web-auth-session`](crates/web_auth_session/): runs an OAuth/SSO login process in the OS's own in-app browser session, and then sends the result back to your app.
   * Currently this is for iOS only, based on `ASWebAuthenticationSession`. There's no other safe/supported way to do web login on iOS, because otherwise iOS will suspend your app while showing the browser.
 
@@ -49,6 +52,7 @@ Symbol legend: ✅ fully supported · ⚠️ partial, or has issues · 🚧 unde
 | [`robius-location`](crates/location/) | ✅ `CLLocationManager` (CoreLocation) | ✅ `CLLocationManager` (CoreLocation) | ✅ `LocationManager` | ✅ `Geolocator` (`Windows.Devices.Geolocation`, WinRT) | ✅ XDG Location portal, with a `GeoClue` fallback |
 | [`robius-open`](crates/open/) | ✅ `NSWorkspace.openURL` | ✅ `UIApplication.openURL` | ✅ `Intent` (`ACTION_VIEW`) | ✅ `Launcher.LaunchUriAsync` (WinRT) | ✅ `xdg-open` |
 | [`robius-share`](crates/share/) | ✅ `NSSharingServicePicker` | ✅ `UIActivityViewController` | ✅ `ACTION_SEND` / `ACTION_SEND_MULTIPLE` via `Intent.createChooser` | ✅ WinRT Share UI (`DataTransferManager`) | ✅ XDG portal "Open With" chooser (`OpenURI` / `OpenFile`), or its `SaveFiles` dialog for multi-item payloads; `xdg-open` fallback |
+| [`robius-speech`](crates/speech/) | ⚠️ `SFSpeechRecognizer` + `AVAudioEngine` | ⚠️ `SFSpeechRecognizer` + `AVAudioEngine` | ⚠️ `SpeechRecognizer` | ⚠️ SAPI dictation | ❌ not supported |
 | [`robius-web-auth-session`](crates/web_auth_session/) | ❌ not supported | ✅ `ASWebAuthenticationSession` | 🚧 planned (custom chrome tabs) | ❌ not supported | ❌ not supported |
 
 
