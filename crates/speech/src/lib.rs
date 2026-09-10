@@ -8,6 +8,9 @@
 //! spoken works as commands or synthesizes key events from them,
 //! so saying something like "enter" will just type the word "enter".
 //!
+//! [`Dictation`] turns those transcripts into edits of a text field, so an app
+//! only has to apply the replacements it hands back.
+//!
 //! Apple builds need the Xcode command line tools (`xcode-select --install`), and
 //! support macOS 11+ and iOS 13+. For macOS builds, set the `MACOSX_DEPLOYMENT_TARGET`
 //! env var to 11.0 or newer for the whole Cargo invocation, including the final app.
@@ -16,6 +19,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+pub mod dictation;
+pub use dictation::{Dictation, Replacement};
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple;

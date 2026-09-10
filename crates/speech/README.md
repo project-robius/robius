@@ -68,6 +68,39 @@ Similarly, `Unavailable` means that the audio input or speech recognition servic
 just doesn't exist and retrying it will never work.
 
 
+## Putting the words into a text field
+
+Transcripts are only half the job; a text field wants "replace these bytes with this text".
+`Dictation` does that bookkeeping for you, and it knows nothing about any UI toolkit:
+
+```rust
+use robius_speech::Dictation;
+
+// Speech replaces the current selection and carries on from there.
+let mut dictation = Dictation::new(&field.text(), field.selection());
+
+// For each `Transcript` event, forwarded to your UI thread:
+if let Some(edit) = dictation.transcript(&text, is_final) {
+    field.replace_range(edit.range, &edit.text);
+    dictation.applied();
+}
+```
+
+Partials revise the current utterance in place and finals commit it, with a space kept
+between the dictated words and whatever the user typed (but not before punctuation,
+or after an opening bracket, or between CJK characters).
+
+Users also keep typing and clicking while they dictate, and that shouldn't lose or repeat
+a word. When you see the user about to change the field (a keystroke, a click that moves
+the caret), call `interrupt()` before their edit lands, and `settle()` with the field's new
+text and selection once it has. Dictation then picks up again from wherever the caret is,
+adding only the words that aren't on screen yet. If the platform IME is mid-composition,
+treat that as an interruption too, and don't `settle()` until it has committed.
+
+Each `Replacement` also says whether it `continues` an earlier one, so you can group a
+whole run of revisions into a single undo step.
+
+
 ## Platform integration
 
 **Apple.** Your application must declare `NSMicrophoneUsageDescription` and
