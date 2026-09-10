@@ -108,15 +108,19 @@ impl Dictation {
     }
 
     /// The field's text and selection now that the current event has been
-    /// handled. Anything we didn't write ourselves counts as an interruption.
-    /// Once an interrupted utterance has finished (or none was in flight),
-    /// dictation re-anchors at the caret and returns whatever was said since
-    /// that isn't on screen yet, if anything.
+    /// handled. Anything we didn't write ourselves counts as an interruption,
+    /// and an interruption that turns out to have changed nothing (End with the
+    /// caret already at the end, a click on the caret) is called off. Once an
+    /// interrupted utterance has finished (or none was in flight), dictation
+    /// re-anchors at the caret and returns whatever was said since that isn't
+    /// on screen yet, if anything.
     pub fn settle(&mut self, text: &str, selection: Range<usize>) -> Option<Replacement> {
         let selection = ordered(selection);
-        if self.interrupted.is_none() && !self.matches(text, &selection) {
-            self.interrupt();
+        if self.matches(text, &selection) {
+            self.interrupted = None;
+            return self.offer();
         }
+        self.interrupt();
         if self.interrupted != Some(false) {
             return None;
         }
@@ -489,6 +493,50 @@ mod tests {
         // The caret follows the words, including the space that keeps them apart.
         assert_eq!(field.text, "there hello");
         assert_eq!(field.caret, 6);
+    }
+
+    #[test]
+    fn an_interruption_that_changed_nothing_is_called_off() {
+        // End with the caret already at the end, or a click on the caret: the
+        // field is untouched, so the utterance carries on, revisions included.
+        let mut dictation = Dictation::new("", 0..0);
+        let mut field = Field::new("", 0);
+        field.say(&mut dictation, "I scream", false);
+        dictation.interrupt();
+        assert_eq!(dictation.transcript("I scream for", false), None, "held while the edit is pending");
+        field.settle(&mut dictation);
+        assert!(!dictation.is_interrupted());
+        assert_eq!(field.text, "I scream for", "the held revision lands as soon as nothing changed");
+        field.say(&mut dictation, "Ice cream please", true);
+        assert_eq!(field.text, "Ice cream please");
+
+        // The same when the final itself arrived while the interruption was pending.
+        let mut dictation = Dictation::new("", 0..0);
+        let mut field = Field::new("", 0);
+        field.say(&mut dictation, "hello world", false);
+        dictation.interrupt();
+        assert_eq!(dictation.transcript("Hello, world.", true), None);
+        field.settle(&mut dictation);
+        assert_eq!(field.text, "Hello, world.");
+    }
+
+    #[test]
+    fn a_partial_that_arrives_during_an_edit_is_written_after_it() {
+        // Between utterances the user types, and the next utterance's first
+        // partial is fed before their edit lands. Nothing was in flight, so the
+        // edit re-anchors at once and the partial goes after it.
+        let mut dictation = Dictation::new("", 0..0);
+        let mut field = Field::new("", 0);
+        field.say(&mut dictation, "first", true);
+        dictation.interrupt();
+        assert_eq!(dictation.transcript("second", false), None);
+        field.text.push('X');
+        field.caret += 1;
+        field.settle(&mut dictation);
+        assert_eq!(field.text, "firstX second");
+        assert!(!dictation.is_interrupted());
+        field.say(&mut dictation, "second one", true);
+        assert_eq!(field.text, "firstX second one");
     }
 
     #[test]
