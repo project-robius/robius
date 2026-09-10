@@ -52,7 +52,7 @@ Symbol legend: ✅ fully supported · ⚠️ partial, or has issues · 🚧 unde
 | [`robius-location`](crates/location/) | ✅ `CLLocationManager` (CoreLocation) | ✅ `CLLocationManager` (CoreLocation) | ✅ `LocationManager` | ✅ `Geolocator` (`Windows.Devices.Geolocation`, WinRT) | ✅ XDG Location portal, with a `GeoClue` fallback |
 | [`robius-open`](crates/open/) | ✅ `NSWorkspace.openURL` | ✅ `UIApplication.openURL` | ✅ `Intent` (`ACTION_VIEW`) | ✅ `Launcher.LaunchUriAsync` (WinRT) | ✅ `xdg-open` |
 | [`robius-share`](crates/share/) | ✅ `NSSharingServicePicker` | ✅ `UIActivityViewController` | ✅ `ACTION_SEND` / `ACTION_SEND_MULTIPLE` via `Intent.createChooser` | ✅ WinRT Share UI (`DataTransferManager`) | ✅ XDG portal "Open With" chooser (`OpenURI` / `OpenFile`), or its `SaveFiles` dialog for multi-item payloads; `xdg-open` fallback |
-| [`robius-speech`](crates/speech/) | ⚠️ `SFSpeechRecognizer` + `AVAudioEngine` | ⚠️ `SFSpeechRecognizer` + `AVAudioEngine` | ⚠️ `SpeechRecognizer` | ⚠️ SAPI dictation | ❌ not supported |
+| [`robius-speech`](crates/speech/) | ✅ `SFSpeechRecognizer` + `AVAudioEngine` | ✅ `SFSpeechRecognizer` + `AVAudioEngine` | ✅ `SpeechRecognizer` (needs an installed recognition service) | ✅ SAPI dictation (needs an installed speech language) | ❌ no OS-native speech-to-text service exists |
 | [`robius-web-auth-session`](crates/web_auth_session/) | ❌ not supported | ✅ `ASWebAuthenticationSession` | 🚧 planned (custom chrome tabs) | ❌ not supported | ❌ not supported |
 
 
