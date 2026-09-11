@@ -156,11 +156,12 @@ impl Dictation {
             return text == self.draft && *selection == (self.start..self.end);
         };
         let caret = self.start + shown.len();
+        // `get`, not indexing: after an edit, our offsets may fall inside one of the field's characters.
         *selection == (caret..caret)
             && text.len() == self.draft.len() - (self.end - self.start) + shown.len()
-            && text[..self.start] == self.draft[..self.start]
-            && text[self.start..caret] == **shown
-            && text[caret..] == self.draft[self.end..]
+            && text.get(..self.start) == Some(&self.draft[..self.start])
+            && text.get(self.start..caret) == Some(shown.as_str())
+            && text.get(caret..) == Some(&self.draft[self.end..])
     }
 
     /// Everything said since the anchor, spaced off the draft around it.
@@ -537,6 +538,22 @@ mod tests {
         assert!(!dictation.is_interrupted());
         field.say(&mut dictation, "second one", true);
         assert_eq!(field.text, "firstX second one");
+    }
+
+    #[test]
+    fn an_edit_that_splits_a_character_at_the_anchor_is_still_an_edit() {
+        // Same length and caret as what we wrote, but the anchor now falls inside the `é`.
+        let mut dictation = Dictation::new("abc", 1..1);
+        let mut field = Field::new("abc", 1);
+        field.say(&mut dictation, "X", false);
+        assert_eq!((field.text.as_str(), field.caret), ("a X bc", 4));
+        dictation.interrupt();
+        field.text = "éX bc".into();
+        field.settle(&mut dictation);
+        assert!(dictation.is_interrupted());
+        field.say(&mut dictation, "X", true);
+        field.settle(&mut dictation);
+        assert_eq!(field.text, "éX bc");
     }
 
     #[test]
