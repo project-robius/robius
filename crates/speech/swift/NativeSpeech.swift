@@ -98,7 +98,8 @@ struct SegmentTracker {
             return out + commit(text)
         }
         open = text
-        return out + [(1, text)]
+        out.append((1, text))
+        return out
     }
 
     /// Commits the words shown but not yet committed, e.g. when a task ends without a final.
