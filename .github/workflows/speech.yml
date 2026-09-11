@@ -1,0 +1,51 @@
+name: Native speech
+
+on:
+  push:
+    paths:
+      - crates/speech/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/speech.yml
+  pull_request:
+    paths:
+      - crates/speech/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/speech.yml
+
+jobs:
+  native:
+    name: Speech (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15-intel, windows-2022, ubuntu-latest]
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p robius-speech --all-targets -- -D warnings
+      - run: cargo test -p robius-speech
+      - name: Apple native lifecycle regressions
+        if: runner.os == 'macOS'
+        run: bash crates/speech/swift/tests/run.sh
+      - name: Compile iOS backends
+        if: matrix.os == 'macos-14'
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          cargo check -p robius-speech --target aarch64-apple-ios
+          cargo check -p robius-speech --target aarch64-apple-ios-sim
+      - uses: actions/setup-java@v4
+        if: matrix.os == 'macos-14'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android speech lifecycle regressions
+        if: matrix.os == 'macos-14'
+        run: python3 crates/speech/tests/android_retry_test.py

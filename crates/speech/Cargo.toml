@@ -1,0 +1,35 @@
+[package]
+name = "robius-speech"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Native streaming speech-to-text input and microphone capture for Rust apps"
+documentation = "https://docs.rs/robius-speech"
+homepage.workspace = true
+keywords = ["robius", "speech", "dictation", "microphone", "STT"]
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[lints.rust]
+keyword_idents_2024 = "forbid"
+non_ascii_idents = "forbid"
+non_local_definitions = "forbid"
+unsafe_op_in_unsafe_fn = "forbid"
+unnameable_types = "warn"
+unused_import_braces = "warn"
+
+[lints.clippy]
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+uninlined_format_args = "allow"
+
+[dependencies]
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61.3", default-features = false, features = ["Win32_Media_Speech", "Win32_System_Com", "Win32_Globalization"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+robius-android-env.workspace = true
