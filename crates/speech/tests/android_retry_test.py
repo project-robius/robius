@@ -656,6 +656,26 @@ public class NativeSpeechRetryTest {
         NativeSpeech.stop(29, true);
         Handler.drain();
     }
+    private static void anErrorKeepsTheWordsShown() {
+        start(30);
+        SpeechRecognizer.last.listener.onPartialResults(words("keep these words"));
+        SpeechRecognizer.last.listener.onError(SpeechRecognizer.ERROR_NETWORK);
+        check(events.indexOf("2:keep these words") >= 0 && events.get(events.size() - 1).startsWith("5:"),
+            "an error commits the words shown before reporting itself");
+        Handler.drain();
+    }
+    private static void aCutShortFinalKeepsTheWordsShown() {
+        start(31);
+        SpeechRecognizer.last.listener.onPartialResults(words("hello world and more"));
+        SpeechRecognizer.last.listener.onResults(words("Hello world."));
+        check(events.contains("2:hello world and more"), "a final that cuts words off the end keeps them");
+        Handler.runNext();
+        SpeechRecognizer.last.listener.onPartialResults(words("I scream for"));
+        SpeechRecognizer.last.listener.onResults(words("Ice cream for you."));
+        check(events.contains("2:Ice cream for you."), "a final that revises words still replaces the partial");
+        NativeSpeech.stop(31, true);
+        Handler.drain();
+    }
     private interface Case { void run(); }
     public static void main(String[] args) {
         System.load(args[0]);
@@ -672,6 +692,8 @@ public class NativeSpeechRetryTest {
             {"queued old removal cannot remove a new permission request", (Case) NativeSpeechRetryTest::restartWhileOldParentRemovalIsQueued},
             {"configuration teardown stops the old pending session", (Case) NativeSpeechRetryTest::configurationTeardownStopsPendingSession},
             {"saved permission state restores through the host classloader", (Case) NativeSpeechRetryTest::processRestoreContainsOnlyHostVisibleClasses},
+            {"an error keeps the words already shown", (Case) NativeSpeechRetryTest::anErrorKeepsTheWordsShown},
+            {"a cut-short final keeps the words shown", (Case) NativeSpeechRetryTest::aCutShortFinalKeepsTheWordsShown},
         };
         for (Object[] entry : cases) {
             System.out.println("  " + entry[0]);

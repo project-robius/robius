@@ -1,7 +1,10 @@
 name: Native speech
 
 on:
+  # Only on main: a branch pushed to this repo would otherwise also run every
+  # job a second time through its pull request.
   push:
+    branches: [main]
     paths:
       - crates/speech/**
       - Cargo.toml

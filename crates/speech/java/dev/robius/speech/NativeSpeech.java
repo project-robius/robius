@@ -15,6 +15,8 @@ import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * One dictation session, driving the system SpeechRecognizer.
@@ -213,6 +215,22 @@ public final class NativeSpeech implements RecognitionListener, Application.Acti
         return values == null || values.isEmpty() || values.get(0) == null ? "" : values.get(0);
     }
 
+    // Whether `text` is `previous` with words cut off the end, comparing words loosely.
+    private static boolean isShortenedRevision(String previous, String text) {
+        List<String> old = looseWords(previous), cut = looseWords(text);
+        return !cut.isEmpty() && cut.size() < old.size() && old.subList(0, cut.size()).equals(cut);
+    }
+
+    // Words ignoring case and surrounding punctuation, as the Rust side compares them.
+    private static List<String> looseWords(String text) {
+        List<String> words = new ArrayList<>();
+        for (String word : text.trim().split("\\s+")) {
+            String loose = word.replaceAll("^[^\\p{L}\\p{N}]+|[^\\p{L}\\p{N}]+$", "").toLowerCase(Locale.ROOT);
+            if (!loose.isEmpty()) words.add(loose);
+        }
+        return words;
+    }
+
     private void commitPending() {
         if (!pending.isEmpty()) {
             event(id, 2, pending, 0);
@@ -261,6 +279,8 @@ public final class NativeSpeech implements RecognitionListener, Application.Acti
 
     private void fail(String message, int kind) {
         if (disposed) return;
+        // Keep the words already shown before reporting the error.
+        commitPending();
         dispose();
         event(id, kind, message, 0);
     }
@@ -312,7 +332,8 @@ public final class NativeSpeech implements RecognitionListener, Application.Acti
         awaitingResult = false;
         transientFailures = 0;
         String text = results == null ? "" : transcript(results);
-        if (!text.isEmpty()) pending = text;
+        // A final that only cuts words off the end of the last partial keeps them.
+        if (!text.isEmpty() && !isShortenedRevision(pending, text)) pending = text;
         commitPending();
         nextUtterance();
     }

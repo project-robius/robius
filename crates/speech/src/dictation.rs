@@ -73,10 +73,21 @@ impl Dictation {
     /// a final commits it. Returns the edit that brings the field up to date, if
     /// there is one; apply it and call [`applied`](Self::applied).
     pub fn transcript(&mut self, text: &str, is_final: bool) -> Option<Replacement> {
-        self.pending = text.trim().to_owned();
+        // Never lose words the recognizer already gave us: an empty transcript changes nothing,
+        // one that starts over commits what it replaces, and one that stops short keeps the rest.
+        let text = text.trim();
+        if !text.is_empty() {
+            let previous = std::mem::take(&mut self.pending);
+            self.pending = text.to_owned();
+            if starts_over(&previous, text) {
+                append_words(&mut self.committed, &previous);
+            } else {
+                append_words(&mut self.pending, &words_beyond(text, &previous));
+            }
+        }
         if is_final {
-            append_words(&mut self.committed, &self.pending);
-            self.pending.clear();
+            let pending = std::mem::take(&mut self.pending);
+            append_words(&mut self.committed, &pending);
         }
         if let Some(awaiting_final) = self.interrupted.as_mut() {
             if is_final {
@@ -193,6 +204,23 @@ fn floor_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
+/// Whether `new` starts over rather than revising `old`, like a recognizer that restarted after
+/// a pause: it drops most words of a long `old`, rather than reformatting a few ("300 and" to "340").
+fn starts_over(old: &str, new: &str) -> bool {
+    let (old, new) = (loose_words(old), loose_words(new));
+    let kept = old.iter().filter(|word| new.contains(word)).count();
+    old.len() >= 6 && !new.is_empty() && new.len() * 2 < old.len() && kept * 4 < old.len()
+}
+
+fn loose_words(text: &str) -> Vec<String> {
+    text.split_whitespace().map(loose).filter(|word| !word.is_empty()).collect()
+}
+
+/// A word compared loosely, because a recognizer routinely re-cases or re-punctuates.
+fn loose(word: &str) -> String {
+    word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase()
+}
+
 /// The part of `spoken` that goes beyond what the user can already see in
 /// `shown`. Words are compared loosely, because a recognizer routinely re-cases
 /// or re-punctuates what it already sent. Returns nothing when the two share no
@@ -201,7 +229,6 @@ fn words_beyond(shown: &str, spoken: &str) -> String {
     if shown.trim().is_empty() {
         return spoken.trim().to_owned();
     }
-    let loose = |word: &str| word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
     let shown_words: Vec<_> = shown.split_whitespace().map(loose).collect();
     let mut matched = 0;
     let mut rest = spoken.trim();
@@ -554,6 +581,38 @@ mod tests {
         field.say(&mut dictation, "X", true);
         field.settle(&mut dictation);
         assert_eq!(field.text, "éX bc");
+    }
+
+    #[test]
+    fn words_already_shown_are_never_removed() {
+        // An empty transcript, partial or final, keeps what is shown.
+        let mut dictation = Dictation::new("", 0..0);
+        let mut field = Field::new("", 0);
+        field.say(&mut dictation, "keep me", false);
+        field.say(&mut dictation, "", false);
+        field.say(&mut dictation, "", true);
+        assert_eq!(field.text, "keep me");
+        // A recognizer that starts over after a pause keeps the phrase before it.
+        field.say(&mut dictation, "a long phrase that took thirty seconds", false);
+        field.say(&mut dictation, "Short phrase.", false);
+        field.say(&mut dictation, "Short phrase.", true);
+        assert_eq!(field.text, "keep me a long phrase that took thirty seconds Short phrase.");
+
+        // A final that stops short keeps the words it left out.
+        let mut dictation = Dictation::new("", 0..0);
+        let mut field = Field::new("", 0);
+        field.say(&mut dictation, "hello world and more", false);
+        field.say(&mut dictation, "Hello world.", true);
+        assert_eq!(field.text, "Hello world. and more");
+
+        // Reformatting a number as it's spoken is a revision, not a restart.
+        let mut dictation = Dictation::new("", 0..0);
+        let mut field = Field::new("", 0);
+        for partial in ["Three", "300", "300 and", "340", "347 apples"] {
+            field.say(&mut dictation, partial, false);
+        }
+        field.say(&mut dictation, "347 apples.", true);
+        assert_eq!(field.text, "347 apples.");
     }
 
     #[test]

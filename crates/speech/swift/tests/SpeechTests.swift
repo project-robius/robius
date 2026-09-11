@@ -28,6 +28,11 @@ enum SpeechTests {
         ("utterance rollover commits the draft", rolloverCommitsTheDraft),
         ("cancelling during rollover emits nothing", cancellingDuringRolloverIsSilent),
         ("a graceful stop replays buffered speech", gracefulStopReplaysBufferedSpeech),
+        ("a segment closed before a restart is kept", segmentsSurviveRestarts),
+        ("a growing transcription commits each segment once", growingTranscriptionIsNotRepeated),
+        ("a restart without metadata keeps the earlier words", restartWithoutMetadataKeepsWords),
+        ("an empty, cut-short or repeated final keeps what was shown", finalsNeverRemoveShownWords),
+        ("a revision of the current utterance stays a revision", revisionsStayRevisions),
     ]
 
     static func main() {
@@ -203,7 +208,7 @@ enum SpeechTests {
         precondition(rollover.engine == nil, "Creating a session must not initialize microphone hardware")
         rollover.started = true
         rollover.generation = 7
-        rollover.lastPartial = "Keep this draft"
+        _ = rollover.segments.result("Keep this draft", isFinal: false, closesSegment: false)
         rollover.endUtteranceBeforeLimit(6, finalizationTimeout: 0)
         precondition(!rollover.endingUtterance, "An old utterance timer must not affect its successor")
         rollover.endUtteranceBeforeLimit(7, finalizationTimeout: 0)
@@ -219,7 +224,7 @@ enum SpeechTests {
         let before = nativeEvents.count
         let cancelled = NativeSpeech(id: 44, locale: "en-US", preferOnDevice: true)
         cancelled.generation = 1
-        cancelled.lastPartial = "Cancelled partial"
+        _ = cancelled.segments.result("Cancelled partial", isFinal: false, closesSegment: false)
         cancelled.endUtteranceBeforeLimit(1, finalizationTimeout: 0)
         cancelled.stop(cancel: true)
         var drained = false
@@ -232,7 +237,7 @@ enum SpeechTests {
         nativeEvents.removeAll()
         let stopping = NativeSpeech(id: 45, locale: "", preferOnDevice: true)
         stopping.stopping = true
-        stopping.lastPartial = "Previous utterance"
+        _ = stopping.segments.result("Previous utterance", isFinal: false, closesSegment: false)
         stopping.capture.beginRequest { _ in }
         stopping.capture.endRequest()
         precondition(stopping.capture.append(audioBuffer(sample: 6)))
@@ -243,13 +248,64 @@ enum SpeechTests {
         var replayed: [Float] = []
         stopping.capture.beginRequest { replayed.append($0.floatChannelData![0][0]) }
         precondition(replayed == [6])
-        stopping.lastPartial = "Buffered final words"
+        _ = stopping.segments.result("Buffered final words", isFinal: false, closesSegment: false)
         stopping.finishStoppedUtterance()
         precondition(nativeEvents.map(\.kind) == [2, 2, 4])
         precondition(nativeEvents[1].text == "Buffered final words" && stopping.finished)
     }
 
+    // MARK: - Segments
+
+    static func segmentsSurviveRestarts() {
+        // Apple's on-device trace: the closing result repeats the last partial, then the text restarts.
+        var tracker = SegmentTracker()
+        let sent = feed(&tracker, [("Can", false, false), ("Can you", false, false), ("Can you", false, true),
+                                   ("Hear", false, false), ("Hear this", false, false), ("Hear this", false, true), ("", true, false)])
+        precondition(sent == ["1:Can", "1:Can you", "2:Can you", "1:Hear", "1:Hear this", "2:Hear this"], "\(sent)")
+    }
+
+    static func growingTranscriptionIsNotRepeated() {
+        var tracker = SegmentTracker()
+        let sent = feed(&tracker, [("Can you", false, false), ("Can you", false, true), ("Can you hear", false, false),
+                                   ("Can you hear this", false, true), ("Can you hear this.", true, false)])
+        precondition(sent == ["1:Can you", "2:Can you", "1:hear", "2:hear this"], "\(sent)")
+    }
+
+    static func restartWithoutMetadataKeepsWords() {
+        var tracker = SegmentTracker()
+        let sent = feed(&tracker, [("one two three four five six", false, false), ("seven", false, false), ("seven eight", true, false)])
+        precondition(sent == ["1:one two three four five six", "2:one two three four five six", "1:seven", "2:seven eight"], "\(sent)")
+    }
+
+    static func finalsNeverRemoveShownWords() {
+        var tracker = SegmentTracker()
+        var sent = feed(&tracker, [("keep these words", false, false), ("", true, false)])
+        precondition(sent == ["1:keep these words", "2:keep these words"], "\(sent)")
+        tracker = SegmentTracker()
+        sent = feed(&tracker, [("keep these words", false, false), ("Keep these.", true, false)])
+        precondition(sent == ["1:keep these words", "2:keep these words"], "\(sent)")
+        tracker = SegmentTracker()
+        sent = feed(&tracker, [("said once", false, true), ("said once", false, true), ("Said once.", true, false)])
+        precondition(sent == ["2:said once"], "\(sent)")
+    }
+
+    static func revisionsStayRevisions() {
+        var tracker = SegmentTracker()
+        let sent = feed(&tracker, [("I scream", false, false), ("Ice cream", false, false), ("Ice cream please.", true, false)])
+        precondition(sent == ["1:I scream", "1:Ice cream", "2:Ice cream please."], "\(sent)")
+        // Apple reformats numbers as they're spoken, e.g. "Three hundred and forty seven apples".
+        var numbers = SegmentTracker()
+        let reformatted = feed(&numbers, [("Three", false, false), ("300", false, false), ("300 and", false, false),
+                                          ("340", false, false), ("347 apples", false, false), ("347 apples.", true, false)])
+        precondition(reformatted.last == "2:347 apples." && !reformatted.contains { $0.hasPrefix("2:300") }, "\(reformatted)")
+    }
+
     // MARK: - Helpers
+
+    /// Feeds (text, isFinal, closesSegment) results and returns what would be sent, as "kind:text".
+    private static func feed(_ tracker: inout SegmentTracker, _ results: [(String, Bool, Bool)]) -> [String] {
+        results.flatMap { tracker.result($0.0, isFinal: $0.1, closesSegment: $0.2) }.map { "\($0.0):\($0.1)" }
+    }
 
     private static func audioBuffer(sample: Float, frames: AVAudioFrameCount = 1) -> AVAudioPCMBuffer {
         let format = AVAudioFormat(standardFormatWithSampleRate: 8_000, channels: 1)!
