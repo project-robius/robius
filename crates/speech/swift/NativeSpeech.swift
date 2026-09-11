@@ -54,6 +54,108 @@ struct SpeechRetryPolicy {
     }
 }
 
+/// Turns one recognition task's results into transcripts that never drop words already sent.
+///
+/// After a pause, on-device recognition closes a segment with one result that has metadata,
+/// then restarts `bestTranscription` from the new words only, without ever setting `isFinal`.
+/// Its final result after `endAudio` can hold only the last segment, or nothing at all.
+struct SegmentTracker {
+    /// Words sent as a partial but not yet committed.
+    private(set) var open = ""
+    /// The last text committed, and the whole transcription at that point.
+    private var committed = ""
+    private var closedTranscription = ""
+    /// Whether this task restarts its transcription after each segment, rather than growing it.
+    private var restarts = false
+
+    /// Returns the transcripts to send (kind 1 partial, kind 2 final) for one result.
+    mutating func result(_ transcription: String, isFinal: Bool, closesSegment: Bool) -> [(Int32, String)] {
+        var text = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A transcription that grows instead of restarting still holds what was committed.
+        if !closedTranscription.isEmpty && !restarts {
+            if let rest = looseRemainder(of: text, after: closedTranscription) {
+                text = rest
+            } else if !text.isEmpty {
+                restarts = true
+            }
+        }
+        var out: [(Int32, String)] = []
+        if isFinal {
+            // An empty or cut-short final keeps what was shown, and a repeat of the
+            // segment just committed isn't committed again.
+            if text.isEmpty || (open.isEmpty && looselyEqual(text, committed)) || isShortenedRevision(of: open, text) {
+                return flush()
+            }
+            if startsOver(from: open, to: text) { out += flush() }
+            open = ""
+            return out + commit(text)
+        }
+        guard !text.isEmpty, !(closesSegment && open.isEmpty && looselyEqual(text, committed)) else { return [] }
+        if startsOver(from: open, to: text) { out += flush() }
+        if closesSegment {
+            open = ""
+            closedTranscription = transcription
+            return out + commit(text)
+        }
+        open = text
+        return out + [(1, text)]
+    }
+
+    /// Commits the words shown but not yet committed, e.g. when a task ends without a final.
+    mutating func flush() -> [(Int32, String)] {
+        defer { open = "" }
+        return commit(open)
+    }
+
+    private mutating func commit(_ text: String) -> [(Int32, String)] {
+        guard !text.isEmpty else { return [] }
+        committed = text
+        return [(2, text)]
+    }
+}
+
+/// Words compared loosely, ignoring case and punctuation, as `dictation.rs` does.
+func looseWords(_ text: String) -> [String] {
+    text.split(whereSeparator: { $0.isWhitespace })
+        .map { $0.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).lowercased() }
+        .filter { !$0.isEmpty }
+}
+
+func looselyEqual(_ a: String, _ b: String) -> Bool {
+    looseWords(a) == looseWords(b)
+}
+
+/// Whether `new` starts over rather than revising `old`, as after a pause without metadata:
+/// it drops most words of a long `old`, rather than reformatting a few (e.g. "300 and" to "340").
+func startsOver(from old: String, to new: String) -> Bool {
+    let (old, new) = (looseWords(old), looseWords(new))
+    let kept = old.filter(new.contains).count
+    return old.count >= 6 && !new.isEmpty && new.count * 2 < old.count && kept * 4 < old.count
+}
+
+/// Whether `new` is `old` with words cut off the end.
+func isShortenedRevision(of old: String, _ new: String) -> Bool {
+    let (old, new) = (looseWords(old), looseWords(new))
+    return !new.isEmpty && new.count < old.count && Array(old.prefix(new.count)) == new
+}
+
+/// The rest of `text` after its first words, if they loosely match all of `prefix`'s words.
+func looseRemainder(of text: String, after prefix: String) -> String? {
+    var expected = looseWords(prefix)[...]
+    var rest = Substring(text)
+    while let word = expected.first {
+        rest = rest.drop(while: { $0.isWhitespace })
+        guard !rest.isEmpty else { return nil }
+        let token = rest.prefix(while: { !$0.isWhitespace })
+        rest = rest.dropFirst(token.count)
+        let loose = looseWords(String(token))
+        if loose.isEmpty { continue }
+        guard loose == [word] else { return nil }
+        expected = expected.dropFirst()
+    }
+    return rest.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 // The engine keeps recording while a recognizer finalizes an utterance. Only
 // that short interval needs copies; otherwise buffers go straight to the request.
 // No engine operations or UI callbacks run while this lock is held.
@@ -165,7 +267,7 @@ final class NativeSpeech {
     var finished = false
     var tapInstalled = false
     var started = false
-    var lastPartial = ""
+    var segments = SegmentTracker()
     var generation: UInt64 = 0
     var retryPolicy = SpeechRetryPolicy()
     var endingUtterance = false
@@ -301,7 +403,7 @@ final class NativeSpeech {
         }
         if #available(macOS 13.0, iOS 16.0, *) { request.addsPunctuation = true }
         self.request = request
-        lastPartial = ""
+        segments = SegmentTracker()
         let capture = self.capture
         capture.prepareRequest(utterance)
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -313,11 +415,16 @@ final class NativeSpeech {
             DispatchQueue.main.async {
                 guard let self = self, !self.finished, self.generation == utterance else { return }
                 if let result = result {
-                    self.lastPartial = result.bestTranscription.formattedString
-                    if !self.lastPartial.isEmpty { self.retryPolicy.madeProgress() }
-                    self.send(result.isFinal ? 2 : 1, self.lastPartial)
+                    let text = result.bestTranscription.formattedString
+                    if !text.isEmpty { self.retryPolicy.madeProgress() }
+                    var closesSegment = false
+                    if #available(iOS 14.0, *) {
+                        closesSegment = !result.isFinal && result.speechRecognitionMetadata != nil
+                    }
+                    for (kind, text) in self.segments.result(text, isFinal: result.isFinal, closesSegment: closesSegment) {
+                        self.send(kind, text)
+                    }
                     if result.isFinal {
-                        self.lastPartial = ""
                         if self.stopping { self.finishStoppedUtterance() }
                         else { self.restartUtterance(after: 0.15) }
                         return
@@ -502,7 +609,7 @@ final class NativeSpeech {
     }
 
     func commitPartial() {
-        if !lastPartial.isEmpty { send(2, lastPartial); lastPartial = "" }
+        for (kind, text) in segments.flush() { send(kind, text) }
     }
 
     func finish() {
