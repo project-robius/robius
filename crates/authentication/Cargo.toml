@@ -52,7 +52,7 @@ objc2-foundation = { workspace = true, features = ["NSError", "NSString"] }
 # optional = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus.workspace = true
+zbus = { workspace = true, features = ["async-io", "blocking-api"] }
 zbus_polkit = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
