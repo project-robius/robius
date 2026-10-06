@@ -101,4 +101,19 @@ fn apple_build(target_os: &str) {
             println!("cargo:rustc-link-search=native={path}");
         }
     }
+    // Swift's `#available` checks call `__isPlatformVersionAtLeast` from clang's runtime library,
+    // which rustc leaves out since it links with `-nodefaultlibs`, so we link it ourselves.
+    let Ok(resource_dir) = Command::new("xcrun").args(["--sdk", sdk, "clang", "-print-resource-dir"]).output() else {
+        missing_toolchain("clang is not installed");
+    };
+    if !resource_dir.status.success() {
+        missing_toolchain("cannot locate clang's runtime libraries");
+    }
+    println!("cargo:rustc-link-search=native={}/lib/darwin", String::from_utf8_lossy(&resource_dir.stdout).trim());
+    let clang_runtime = match (target_os, simulator) {
+        ("macos", _) => "clang_rt.osx",
+        (_, true) => "clang_rt.iossim",
+        _ => "clang_rt.ios",
+    };
+    println!("cargo:rustc-link-lib=static:-bundle={clang_runtime}");
 }
