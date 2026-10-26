@@ -30,8 +30,10 @@ ShareSheet::new()
 
 Android `content://` attachments are shared directly. Filesystem path
 attachments are copied to a shareable MediaStore item on Android 10 and newer.
-On Android 8 and 9, API 26 through 28, text files can be shared as text
-content; arbitrary binary path attachments require a host-app `ContentProvider`.
+On Android 8 and 9, API 26 through 28, they are copied into the app's cache and
+shared through the host app's `ContentProvider`, if it declares one (see
+below). Without one, text files are shared as text content, and arbitrary binary
+path attachments can't be shared.
 
 The **minimum supported Android API level is 26 (Android 8.0)**: the bundled Java
 helper is loaded via `InMemoryDexClassLoader`, which requires API 26, so set
@@ -53,25 +55,36 @@ That authority must be unique per installed app. `robius-share` cannot use one
 global authority like `robius.share`, because two different apps that depend on
 this crate would then declare the same provider authority and conflict at
 install time. The authority also has to appear in the final Android manifest;
-it cannot be registered after the app starts.
+it cannot be registered after the app starts, so the host app has to declare
+the provider.
 
-This provider setup is only required by `robius-share` when all of these are
-true:
+A provider is only needed on Android 8 and 9, API 26 through 28, to share
+filesystem path attachments (`add_file(path)`). It is not needed for
+`content://` URIs, such as those returned by `robius-file-picker`, because those
+URIs already come from a provider. It is also not needed for `add_file(path)` on
+Android 10 and newer, because `robius-share` copies the file to a shareable
+MediaStore item before opening the Android Sharesheet.
 
-- the app is running on Android 8 or 9, API 26 through 28;
-- the payload is an app-private filesystem path;
-- the file must be shared as a real attachment rather than as text content;
-- the file is an arbitrary binary file, such as a PDF, image, video, archive, or
-  custom document.
+On Android 8 and 9, `add_file(path)` uses the provider whose authority is the
+app's package name followed by `.robius.share`, if the app declares one:
 
-It is not needed for `content://` URIs returned by `robius-file-picker`, because
-those URIs already come from a provider. It is also not needed for
-`add_file(path)` on Android 10 and newer, because `robius-share` copies the file
-to a shareable MediaStore item before opening the Android Sharesheet. If your
-app already has a `FileProvider` or custom `ContentProvider`, you can reuse that
-instead of adding a separate Robius-specific provider.
+- it copies the file to `<cache dir>/robius-share/<uuid>/<file name>`, where
+  `<cache dir>` is the app's `Context.getCacheDir()` and `<uuid>` is a new
+  random UUID, in lowercase;
+- it shares that copy as
+  `content://<package name>.robius.share/robius-share/<uuid>/<file name>`,
+  so the provider has to serve the `robius-share` directory of the cache under
+  the URI path `robius-share`;
+- it only uses a provider that belongs to the app itself and lets it grant
+  access to that URI (`android:grantUriPermissions="true"`, or a matching
+  `<grant-uri-permission>`), and it checks that the provider serves the copy.
+  Otherwise it falls back to the behavior without a provider;
+- on a later share, it deletes the directories in `<cache dir>/robius-share`
+  whose names are lowercase UUIDs and that haven't changed for a day, without
+  following symbolic links. The app may keep its own files in that directory,
+  as long as their names aren't UUIDs.
 
-The normal app integration is:
+With androidx's `FileProvider`, that's:
 
 ```xml
 <provider
@@ -85,29 +98,43 @@ The normal app integration is:
 </provider>
 ```
 
-with a matching `res/xml/robius_share_paths.xml`, for example:
+with a matching `res/xml/robius_share_paths.xml`:
 
 ```xml
 <paths>
-    <cache-path name="robius-share-cache" path="robius-share/" />
-    <files-path name="robius-share-files" path="robius-share/" />
+    <!-- The name must be "robius-share", the URI path robius-share uses. -->
+    <cache-path name="robius-share" path="robius-share/" />
 </paths>
 ```
 
-For Makepad apps, the same idea can be expressed in
-`resources/android/AndroidManifest.xml.template` using Makepad's package token:
+Makepad apps don't bundle androidx, so they can't use `FileProvider`. cargo-makepad
+builds that include `dev.makepad.android.MakepadFileProvider` can declare that
+instead, in `resources/android/AndroidManifest.xml.template`, using Makepad's
+package token:
 
 ```xml
-android:authorities="{package_id}.robius.share"
+<provider
+    android:name="dev.makepad.android.MakepadFileProvider"
+    android:authorities="{package_id}.robius.share"
+    android:exported="false"
+    android:grantUriPermissions="true">
+    <meta-data
+        android:name="dev.makepad.android.MakepadFileProvider.cacheDirs"
+        android:value="robius-share" />
+</provider>
 ```
 
-Once your app has converted a file path into a provider-backed `content://` URI,
-pass that URI to `robius-share`:
+Only declare a provider class that your APK actually contains: Android starts
+an app's providers when the app starts, so a missing class crashes the app at
+launch on every Android version.
+
+An app can also make its own `content://` URIs, with this provider or any other
+one it already has, and pass them to `robius-share`:
 
 ```rust
 use robius_share::ShareSheet;
 
-let uri = "content://dev.example.notes.robius.share/robius-share-cache/report.pdf";
+let uri = "content://dev.example.notes.robius.share/robius-share/report.pdf";
 
 ShareSheet::new()
     .set_title("Share report")
@@ -134,9 +161,10 @@ ShareSheet::new()
 ```
 
 That `add_file(...)` example is a true file attachment on iOS, macOS, Windows,
-Linux, and Android 10 or newer. On Android 8 and 9, the crate can share small
-text files as text content, but arbitrary binary paths such as PDFs, images, or
-videos need the host app to provide a `content://` URI and call `add_file_uri`.
+Linux, and Android 10 or newer. On Android 8 and 9 it is one only if the app
+declares the provider described above; without one, small text files are shared
+as text content, and arbitrary binary paths such as PDFs, images, or videos
+can't be shared.
 
 Android's FileProvider setup is documented here:
 <https://developer.android.com/training/secure-file-sharing/setup-sharing>.

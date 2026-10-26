@@ -8,9 +8,10 @@
 //!   * Text, URLs, `content://` attachments, and filesystem path attachments
 //!     are supported.
 //!   * Filesystem path attachments are copied to a shareable MediaStore item on
-//!     Android 10 and newer. On older Android versions, text files can be shared
-//!     as text content, but arbitrary binary path attachments require an app
-//!     `ContentProvider`.
+//!     Android 10 and newer. On older Android versions, they are shared through
+//!     the app's `<package name>.robius.share` `ContentProvider` if it declares
+//!     one (see the crate README). Without one, text files are shared as text
+//!     content, and arbitrary binary path attachments can't be shared.
 //!   * **Minimum API level: 26 (Android 8.0).** The bundled Java helper is loaded
 //!     via `InMemoryDexClassLoader`, which requires API 26. Set `minSdk` to at
 //!     least 26 in your app.
@@ -108,9 +109,11 @@ impl ShareSheet {
     /// Adds a filesystem path attachment.
     ///
     /// On Android 10 and newer, this copies the file to a shareable MediaStore
-    /// item before launching the chooser. On older Android versions, text files
-    /// can be shared as text content, while arbitrary binary path attachments
-    /// require a host app `ContentProvider`.
+    /// item before launching the chooser. On older Android versions, it copies
+    /// the file into the app's cache and shares it through the host app's
+    /// `<package name>.robius.share` `ContentProvider`, if the app declares one
+    /// (see the crate README). Without one, text files are shared as text
+    /// content, while arbitrary binary path attachments can't be shared.
     #[must_use]
     pub fn add_file<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.options.items.push(ShareItem::File(SharedFile::from_path(path)));
