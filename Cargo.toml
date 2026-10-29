@@ -69,11 +69,13 @@ objc2-app-kit                  = { version = "0.3.2", default-features = false, 
 objc2-authentication-services  = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-core-location            = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-foundation               = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-intents                  = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-local-authentication     = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-photos                   = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-photos-ui                = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-ui-kit                   = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-user-notifications       = { version = "0.3.2", default-features = false, features = ["std"] }
 
 
 ## Linux-specific dependencies used in multiple crates in the workspace.
