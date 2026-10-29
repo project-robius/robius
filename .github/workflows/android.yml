@@ -1,0 +1,99 @@
+name: Android
+
+on:
+  # Only on main: a branch pushed to this repo would otherwise also run every
+  # job a second time through its pull request.
+  push:
+    branches: [main]
+    paths:
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/android.yml
+  pull_request:
+    paths:
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/android.yml
+
+jobs:
+  check:
+    # Both Android ABIs that apps ship: arm64-v8a and 32-bit armeabi-v7a.
+    # Checking the 32-bit one catches code that only works with 64-bit pointers.
+    name: Android (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-linux-android, armv7-linux-androideabi]
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # The build scripts compile Java with javac and dex it with d8 from the
+      # Android SDK. Pin JDK 17, the version cargo-makepad bundles, rather than
+      # the runner's default JDK, which is moving to 25 on newer images.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Select Android SDK platform and build-tools
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk" ] || [ ! -d "$sdk" ]; then
+            echo "::error::No Android SDK found (ANDROID_HOME and ANDROID_SDK_ROOT are unset or missing)"
+            exit 1
+          fi
+          # Find the newest stable platform. Leave out -ext and preview (-beta) ones:
+          # left to themselves, the build scripts would pick a preview such as
+          # android-37.2-beta3. Prefer a plain API level (android-36), then a
+          # minor release (android-37.1).
+          newest() { { ls -1 "$1" 2>/dev/null || true; } | { grep -E "$2" || true; } | sort -V | tail -n 1; }
+          platform=$(newest "$sdk/platforms" '^android-[0-9]+$')
+          if [ -z "$platform" ]; then
+            platform=$(newest "$sdk/platforms" '^android-[0-9]+\.[0-9]+$')
+          fi
+          build_tools=$(newest "$sdk/build-tools" '^[0-9]+\.[0-9]+\.[0-9]+$')
+          android_jar="$sdk/platforms/$platform/android.jar"
+          d8_jar="$sdk/build-tools/$build_tools/lib/d8.jar"
+          if [ -z "$platform" ] || [ ! -f "$android_jar" ]; then
+            echo "::error::No stable platform with android.jar under $sdk/platforms"; ls "$sdk/platforms"; exit 1
+          fi
+          if [ -z "$build_tools" ] || [ ! -f "$d8_jar" ]; then
+            echo "::error::No build-tools with lib/d8.jar under $sdk/build-tools"; ls "$sdk/build-tools"; exit 1
+          fi
+          echo "Using $platform, build-tools $build_tools, JAVA_HOME=$JAVA_HOME"
+          {
+            # robius-speech reads ANDROID_HOME, ANDROID_PLATFORM and ANDROID_BUILD_TOOLS_VERSION
+            # as directory names, so ANDROID_PLATFORM must be the full "android-NN" form.
+            echo "ANDROID_HOME=$sdk"
+            echo "ANDROID_SDK_ROOT=$sdk"
+            echo "ANDROID_PLATFORM=$platform"
+            echo "ANDROID_BUILD_TOOLS_VERSION=$build_tools"
+            # The `android-build` crate checks these two first.
+            echo "ANDROID_JAR=$android_jar"
+            echo "ANDROID_D8_JAR=$d8_jar"
+          } >> "$GITHUB_ENV"
+      # Checks every workspace crate: crates without Android code compile their
+      # no-op backends. Benches are left out because the robius-directories
+      # bench doesn't build on any platform. No NDK is needed, because
+      # `cargo check` never links.
+      - name: cargo check
+        run: |
+          set -o pipefail
+          cargo check --locked --workspace --lib --examples --tests --target ${{ matrix.target }} 2>&1 | tee check.log
+          # robius-speech doesn't fail when it can't find the SDK or JDK. It
+          # quietly builds without its Android backend, and then this job would
+          # skip that code.
+          if grep -q "Android native dictation disabled" check.log; then
+            echo "::error::robius-speech built without its Android backend; see the warning above"
+            exit 1
+          fi

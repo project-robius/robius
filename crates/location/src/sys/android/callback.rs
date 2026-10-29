@@ -36,9 +36,6 @@ unsafe extern "C" fn rust_callback<'a>(
     location: JObject<'a>,
     cached: jboolean,
 ) {
-    #[cfg(not(target_pointer_width = "64"))]
-    compile_error!("non-64-bit Android targets are not supported");
-
     if shared_ptr == 0 {
         return;
     }
