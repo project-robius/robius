@@ -1,0 +1,52 @@
+[package]
+name = "robius-theme"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.77.0"
+authors.workspace = true
+description = "Rust abstractions for getting the system's light or dark theme and subscribing to changes"
+documentation = "https://docs.rs/robius-theme"
+homepage.workspace = true
+keywords = ["robius", "theme", "dark-mode", "appearance"]
+categories.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+## macOS and Windows need no dependencies: they call a few system functions directly.
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+robius-android-env.workspace = true
+
+[target.'cfg(target_os = "ios")'.dependencies]
+dispatch2.workspace = true
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = [
+    "NSArray",
+    "NSEnumerator",
+    "NSNotification",
+    "NSSet",
+    "NSString",
+] }
+objc2-ui-kit = { workspace = true, features = [
+    "UIApplication",
+    "UIInterface",
+    "UIResponder",
+    "UIScene",
+    "UIScreen",
+    "UITraitCollection",
+    "UIView",
+    "UIWindow",
+    "UIWindowScene",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { workspace = true, features = ["async-io"] }
+
+## The example needs an `NSApplication`, since macOS only reports changes to apps.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "forbid"
