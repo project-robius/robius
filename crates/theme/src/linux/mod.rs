@@ -1,12 +1,15 @@
 //! Linux desktops share the theme through the XDG Desktop Portal: the
 //! `color-scheme` setting of `org.freedesktop.portal.Settings` on the session bus.
-//! It is dark, light or no preference, and GNOME's light style is no preference.
-//! A desktop without the portal, or without the setting, has no preference either.
+//! Desktops from before that setting (such as GNOME before 42, KDE Plasma before
+//! 5.24, and older Cinnamon, MATE and Xfce) only name a theme, and window managers
+//! without a desktop use GTK's own settings file, so `desktop.rs` reads those.
 //!
-//! One thread, `robius-theme`, keeps a bus connection and reads the setting again
-//! each time the portal says that it changed. zbus is only used inside
-//! `zbus::block_on` on our own threads, and subscribers are only called between
-//! two such calls, which works the same with zbus on async-io or on Tokio.
+//! One thread, `robius-theme`, keeps a bus connection and reads the theme again
+//! each time the portal or one of those settings files says that it changed. zbus
+//! is only used inside `zbus::block_on` on our own threads, and subscribers are only
+//! called between two such calls, which works the same with zbus on async-io or on Tokio.
+
+mod desktop;
 
 use std::{
     future::{poll_fn, Future},
@@ -14,9 +17,9 @@ use std::{
     pin::{pin, Pin},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc, Mutex, PoisonError,
     },
-    task::Poll,
+    task::{Poll, Waker},
     thread,
     time::Duration,
 };
@@ -24,6 +27,7 @@ use std::{
 use zbus::{connection::Builder, export::futures_core::Stream, zvariant::Value, Connection, Message, MessageStream};
 
 use crate::{Error, Result, Theme};
+use desktop::Desktop;
 
 const BUS: &str = "org.freedesktop.DBus";
 const PORTAL: &str = "org.freedesktop.portal.Desktop";
@@ -31,10 +35,6 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const SETTINGS: &str = "org.freedesktop.portal.Settings";
 const COLOR_SCHEME: (&str, &str) = ("org.freedesktop.appearance", "color-scheme");
 
-/// The bus only passes on changes of this one setting, and only from the portal.
-const SETTING_CHANGED: &str = "type='signal',sender='org.freedesktop.portal.Desktop',\
-    path='/org/freedesktop/portal/desktop',interface='org.freedesktop.portal.Settings',\
-    member='SettingChanged',arg0='org.freedesktop.appearance',arg1='color-scheme'";
 /// The bus sends this when the portal starts, exits or is replaced.
 const PORTAL_OWNER_CHANGED: &str = "type='signal',sender='org.freedesktop.DBus',\
     path='/org/freedesktop/DBus',interface='org.freedesktop.DBus',\
@@ -47,6 +47,11 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(1);
 static IS_RUNNING: AtomicBool = AtomicBool::new(false);
 /// Whether that worker has given subscribers a theme, which it then keeps current.
 static IS_LATEST_CURRENT: AtomicBool = AtomicBool::new(false);
+/// Whether one of the desktop's settings files changed since the worker last read the theme.
+/// Only older desktops need those files, so on others nothing follows them.
+static ARE_FILES_CHANGED: AtomicBool = AtomicBool::new(false);
+/// Wakes the worker, for when the settings files change.
+static WORKER: Mutex<Option<Waker>> = Mutex::new(None);
 
 pub(crate) fn query() -> Result<Option<Theme>> {
     // The worker keeps the latest theme current, so the bus isn't asked again.
@@ -87,9 +92,26 @@ fn spawn(name: &str, run: impl FnOnce() + Send + 'static) -> Result<()> {
     thread.map(drop).map_err(|error| Error::Unavailable(format!("could not start a thread: {error}")))
 }
 
+/// Called from the thread that follows the desktop's settings files, when one of them changed.
+fn files_changed() {
+    if IS_RUNNING.load(Ordering::Acquire) {
+        // The worker reads the theme again, starting with the portal.
+        ARE_FILES_CHANGED.store(true, Ordering::Release);
+        if let Some(worker) = WORKER.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            worker.wake();
+        }
+    } else {
+        // Without a session bus, there are only the files.
+        crate::refresh(|| Desktop::current().theme());
+    }
+}
+
 /// Runs on the worker thread until the session bus goes away.
 fn work() {
     let Ok(mut portal) = zbus::block_on(Portal::subscribe()) else {
+        // Without a session bus, subscribers get the theme from the desktop's own settings.
+        desktop::follow_files(files_changed);
+        crate::refresh(|| Desktop::current().theme());
         return;
     };
     // Subscribers are called here, between two `block_on` calls.
@@ -102,11 +124,12 @@ fn work() {
     }
 }
 
-/// Reads the setting once over a connection of its own, for `query`.
+/// Reads the theme once over a connection of its own, for `query`.
 async fn read_once() -> Result<Option<Theme>> {
     match connect(Some(QUERY_TIMEOUT)).await {
-        Ok(conn) => drive(&conn, read(conn.clone())).await,
-        Err(error) => Err(Error::Unavailable(format!("could not connect to the session bus: {error}"))),
+        Ok(conn) => drive(&conn, read(conn.clone(), false)).await,
+        // Without a session bus, there are only the desktop's own settings.
+        Err(_) => Ok(Desktop::current().theme()),
     }
 }
 
@@ -134,12 +157,60 @@ async fn drive<F: Future>(conn: &Connection, future: F) -> F::Output {
     .await
 }
 
-/// Reads the setting with `ReadOne`, or with `Read` from a portal too old to have that.
-async fn read(conn: Connection) -> Result<Option<Theme>> {
+/// Reads the portal's `color-scheme`, or else the theme that the desktop's own settings name.
+/// With `is_following`, it also starts following those other settings, the first time they're needed.
+async fn read(conn: Connection, is_following: bool) -> Result<Option<Theme>> {
+    let desktop = Desktop::current();
+    match read_setting(&conn, COLOR_SCHEME).await? {
+        Some(Setting::Number(1)) => return Ok(Some(Theme::Dark)),
+        Some(Setting::Number(2)) => return Ok(Some(Theme::Light)),
+        // Those desktops keep this setting current, so no preference is their answer.
+        Some(_) if desktop.is_color_scheme_kept() => return Ok(None),
+        // An older desktop: no such setting, or one that this desktop doesn't keep current.
+        _ => {}
+    }
+    if let Some((namespace, key)) = desktop.portal_setting() {
+        if is_following {
+            add_match(&conn, &setting_changed(namespace, key)).await?;
+        }
+        if let Some(Setting::Text(text)) = read_setting(&conn, (namespace, key)).await? {
+            if let Some(theme) = desktop::theme_of(&text) {
+                return Ok(Some(theme));
+            }
+        }
+    }
+    if is_following {
+        desktop::follow_files(files_changed);
+    }
+    Ok(desktop.theme())
+}
+
+/// A rule for the bus to pass on changes of one setting, and only from the portal.
+fn setting_changed(namespace: &str, key: &str) -> String {
+    format!(
+        "type='signal',sender='{PORTAL}',path='{PORTAL_PATH}',interface='{SETTINGS}',\
+        member='SettingChanged',arg0='{namespace}',arg1='{key}'"
+    )
+}
+
+/// Asks the bus to pass on the messages that `rule` describes.
+async fn add_match(conn: &Connection, rule: &str) -> Result<()> {
+    let reply = conn.call_method(Some(BUS), "/org/freedesktop/DBus", Some(BUS), "AddMatch", &rule).await;
+    reply.map(drop).map_err(|error| Error::Unavailable(format!("could not subscribe to the desktop portal: {error}")))
+}
+
+/// A setting's value: `color-scheme` is a number, and the older settings are text.
+enum Setting {
+    Number(u32),
+    Text(String),
+}
+
+/// Reads one setting with `ReadOne`, or with `Read` from a portal too old to have that.
+async fn read_setting(conn: &Connection, setting: (&str, &str)) -> Result<Option<Setting>> {
     for method in ["ReadOne", "Read"] {
-        let reply = conn.call_method(Some(PORTAL), PORTAL_PATH, Some(SETTINGS), method, &COLOR_SCHEME).await;
+        let reply = conn.call_method(Some(PORTAL), PORTAL_PATH, Some(SETTINGS), method, &setting).await;
         let error = match reply {
-            Ok(reply) => return theme_in(&reply),
+            Ok(reply) => return setting_in(&reply).map(Some),
             Err(error) => error,
         };
         let name = match &error {
@@ -148,33 +219,31 @@ async fn read(conn: Connection) -> Result<Option<Theme>> {
         };
         match name {
             "org.freedesktop.DBus.Error.UnknownMethod" => {}
-            // No portal, or no such setting in it: the system states no preference.
+            // No portal, or no such setting in it.
             "org.freedesktop.DBus.Error.ServiceUnknown"
             | "org.freedesktop.DBus.Error.NameHasNoOwner"
             | "org.freedesktop.DBus.Error.UnknownInterface"
             | "org.freedesktop.DBus.Error.UnknownObject"
             | "org.freedesktop.portal.Error.NotFound" => return Ok(None),
-            _ => return Err(Error::Unavailable(format!("could not read the desktop portal's setting: {error}"))),
+            _ => return Err(Error::Unavailable(format!("could not read the desktop portal's settings: {error}"))),
         }
     }
     // A portal with neither method has no settings at all.
     Ok(None)
 }
 
-/// The theme that a reply from the portal holds.
-fn theme_in(reply: &Message) -> Result<Option<Theme>> {
+/// The setting that a reply from the portal holds.
+fn setting_in(reply: &Message) -> Result<Setting> {
     let body = reply.body();
-    // `Read` wraps the number in one more variant than `ReadOne` does.
+    // `Read` wraps the value in one more variant than `ReadOne` does.
     let mut value = body.deserialize::<Value<'_>>().ok();
     while let Some(Value::Value(inner)) = value {
         value = Some(*inner);
     }
     match value {
-        Some(Value::U32(1)) => Ok(Some(Theme::Dark)),
-        Some(Value::U32(2)) => Ok(Some(Theme::Light)),
-        // 0 is no preference, and the portal says to treat unknown numbers alike.
-        Some(Value::U32(_)) => Ok(None),
-        _ => Err(Error::Unavailable("the desktop portal's answer was not a color scheme".into())),
+        Some(Value::U32(number)) => Ok(Setting::Number(number)),
+        Some(Value::Str(text)) => Ok(Setting::Text(text.as_str().to_owned())),
+        _ => Err(Error::Unavailable("the desktop portal's answer was not a theme setting".into())),
     }
 }
 
@@ -192,7 +261,7 @@ struct Portal {
 }
 
 enum Event {
-    /// The portal says that the setting changed.
+    /// The portal or a settings file says that the theme may have changed.
     Changed,
     /// The portal started, or another one replaced it.
     PortalStarted,
@@ -206,7 +275,7 @@ impl Portal {
         let conn = connect(None).await?;
         // This exists before the bus is asked for anything, so no change can be missed.
         let messages = MessageStream::from(&conn);
-        for rule in [SETTING_CHANGED, PORTAL_OWNER_CHANGED] {
+        for rule in [setting_changed(COLOR_SCHEME.0, COLOR_SCHEME.1), PORTAL_OWNER_CHANGED.to_owned()] {
             let add_match = conn.call_method(Some(BUS), "/org/freedesktop/DBus", Some(BUS), "AddMatch", &rule);
             drive(&conn, add_match).await?;
         }
@@ -218,7 +287,7 @@ impl Portal {
         loop {
             if self.is_stale && self.reading.is_none() {
                 self.is_stale = false;
-                self.reading = Some(Box::pin(read(self.conn.clone())));
+                self.reading = Some(Box::pin(read(self.conn.clone(), true)));
             }
             match self.next_event().await {
                 Event::Changed => self.is_stale = true,
@@ -245,6 +314,12 @@ impl Portal {
     async fn next_event(&mut self) -> Event {
         let Self { conn, messages, reading, .. } = self;
         let event = poll_fn(|cx| {
+            if desktop::is_following_files() {
+                *WORKER.lock().unwrap_or_else(PoisonError::into_inner) = Some(cx.waker().clone());
+                if ARE_FILES_CHANGED.swap(false, Ordering::AcqRel) {
+                    return Poll::Ready(Event::Changed);
+                }
+            }
             // zbus stops reading the socket once 64 messages wait here, so take them all.
             loop {
                 match Pin::new(&mut *messages).poll_next(cx) {
@@ -295,13 +370,22 @@ mod tests {
     }
 
     #[test]
-    fn a_reply_holds_dark_light_or_no_preference() {
-        let theme = |value| theme_in(&reply(value));
-        assert_eq!(theme(Value::U32(1)), Ok(Some(Theme::Dark)));
-        assert_eq!(theme(Value::U32(2)), Ok(Some(Theme::Light)));
-        assert_eq!(theme(Value::U32(0)), Ok(None));
-        assert_eq!(theme(Value::U32(7)), Ok(None));
-        assert_eq!(theme(Value::Value(Box::new(Value::U32(1)))), Ok(Some(Theme::Dark)));
-        assert!(theme(Value::from("dark")).is_err());
+    fn a_reply_holds_a_number_or_text() {
+        let setting = |value| setting_in(&reply(value));
+        assert!(matches!(setting(Value::U32(1)), Ok(Setting::Number(1))));
+        assert!(matches!(setting(Value::Value(Box::new(Value::U32(2)))), Ok(Setting::Number(2))));
+        assert!(matches!(setting(Value::from("Yaru-dark")), Ok(Setting::Text(text)) if text == "Yaru-dark"));
+        assert!(matches!(setting(Value::Value(Box::new(Value::from("Adwaita")))), Ok(Setting::Text(text)) if text == "Adwaita"));
+        assert!(setting(Value::Bool(true)).is_err());
+    }
+
+    #[test]
+    fn a_rule_names_its_setting_and_the_portal() {
+        assert_eq!(
+            setting_changed("org.freedesktop.appearance", "color-scheme"),
+            "type='signal',sender='org.freedesktop.portal.Desktop',path='/org/freedesktop/portal/desktop',\
+            interface='org.freedesktop.portal.Settings',member='SettingChanged',\
+            arg0='org.freedesktop.appearance',arg1='color-scheme'"
+        );
     }
 }

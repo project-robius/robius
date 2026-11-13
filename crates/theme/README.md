@@ -83,12 +83,19 @@ Windows keeps the app theme in the registry value that this crate reads, and it'
 ### Linux
 
 The [Settings portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html) is the one source that every modern desktop shares, and the only one that works inside Flatpak and Snap.
-GNOME 42+, KDE Plasma 5.24+, Cinnamon, Xfce, MATE, COSMIC, and elementary OS all offer it, and `darkman` adds it to any other desktop.
+GNOME 42+, KDE Plasma 5.24+, Cinnamon, Xfce 4.18+, MATE, COSMIC, and elementary OS all offer its `color-scheme`, and `darkman` adds it to any other desktop.
 
-* GNOME reports no preference (`None`) for its default light style, and only reports dark as a preference.
-* A desktop without the portal or its `color-scheme` setting also gives `None`. This crate doesn't guess from GTK or Qt theme names.
+Older desktops only name a theme, so where the portal has no `color-scheme` (or one that the desktop doesn't keep current), this crate reads the desktop's own setting:
+
+* GNOME before 42 (like Ubuntu 20.04) and KDE Plasma before 5.24: the GTK theme's name, or KDE's window color, through the same portal.
+* Cinnamon, MATE and Xfce: their own GTK theme setting.
+* Window managers without a desktop (i3, sway, Openbox, LXDE and others), and systems without the portal: GTK's `settings.ini`.
+
+A theme whose name has "dark" in it (like `Yaru-dark`, but not `Arc-Darker`) counts as dark.
+Changes to all of these are followed too, but only on desktops that need them: on a current desktop, none of this runs.
+
+* GNOME 42+ reports its default light style as no preference (`None`).
 * `query()` can wait up to a second while the desktop starts the portal. Once a subscription has received the theme, `query()` answers from memory.
-* A missing session bus is an `Err` from `query()`. The callback is then never called.
 
 ## Following the system in an app with its own theme setting
 

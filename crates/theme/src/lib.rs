@@ -37,7 +37,7 @@ use std::{
 
 #[cfg_attr(target_os = "android", path = "android.rs")]
 #[cfg_attr(any(target_os = "ios", target_os = "macos"), path = "apple/mod.rs")]
-#[cfg_attr(target_os = "linux", path = "linux.rs")]
+#[cfg_attr(target_os = "linux", path = "linux/mod.rs")]
 #[cfg_attr(target_os = "windows", path = "windows.rs")]
 #[cfg_attr(
     not(any(
