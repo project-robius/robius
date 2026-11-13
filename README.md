@@ -38,6 +38,9 @@ There's also a [status table](#crate--platform-status-table) that shows what eac
 * [`robius-speech`](crates/speech/): streams native speech-to-text results and microphone levels on macOS, iOS, Android, and Windows.
   * Provides recording sessions with partial/final transcripts, graceful stop, and cancellation, independently of the UI toolkit.
   * Linux doesn't offer any OS-provided speech-to-text functionality, so this crate can't do anything on Linux.
+* [`robius-theme`](crates/theme/): gets the system's light or dark theme, and allows you to subscribe and receive a callback whenever it changes.
+  * This reads the `AppleInterfaceStyle` preference on macOS, the main `UIScreen`'s traits on iOS, `Configuration.uiMode` on Android, the `AppsUseLightTheme` registry value on Windows, and the XDG Settings portal on Linux.
+  * The system reports each change, so nothing is checked on a timer. On macOS and Windows it has no dependencies at all.
 * [`robius-web-auth-session`](crates/web_auth_session/): runs an OAuth/SSO login process in the OS's own in-app browser session, and then sends the result back to your app.
   * Currently this is for iOS only, based on `ASWebAuthenticationSession`. There's no other safe/supported way to do web login on iOS, because otherwise iOS will suspend your app while showing the browser.
 
@@ -53,6 +56,7 @@ Symbol legend: ✅ fully supported · ⚠️ partial, or has issues · 🚧 unde
 | [`robius-open`](crates/open/) | ✅ `NSWorkspace.openURL` | ✅ `UIApplication.openURL` | ✅ `Intent` (`ACTION_VIEW`) | ✅ `Launcher.LaunchUriAsync` (WinRT) | ✅ `xdg-open` |
 | [`robius-share`](crates/share/) | ✅ `NSSharingServicePicker` | ✅ `UIActivityViewController` | ✅ `ACTION_SEND` / `ACTION_SEND_MULTIPLE` via `Intent.createChooser` | ✅ WinRT Share UI (`DataTransferManager`) | ✅ XDG portal "Open With" chooser (`OpenURI` / `OpenFile`), or its `SaveFiles` dialog for multi-item payloads; `xdg-open` fallback |
 | [`robius-speech`](crates/speech/) | ✅ `SFSpeechRecognizer` + `AVAudioEngine` | ✅ `SFSpeechRecognizer` + `AVAudioEngine` | ✅ `SpeechRecognizer` (needs an installed recognition service) | ✅ SAPI dictation (needs an installed speech language) | ❌ no OS-native speech-to-text service exists |
+| [`robius-theme`](crates/theme/) | ✅ `AppleInterfaceStyle` preference + `AppleInterfaceThemeChangedNotification` | ✅ `UIScreen` traits + `registerForTraitChanges` (`traitCollectionDidChange` before iOS 17) | ✅ `Configuration.uiMode` + `ComponentCallbacks` | ✅ `AppsUseLightTheme` registry value + `RegNotifyChangeKeyValue` | ✅ XDG Settings portal (`color-scheme`) |
 | [`robius-web-auth-session`](crates/web_auth_session/) | ❌ not supported | ✅ `ASWebAuthenticationSession` | 🚧 planned (custom chrome tabs) | ❌ not supported | ❌ not supported |
 
 
@@ -70,6 +74,7 @@ On Android, most crates support API Level 26 and up (Android 8.0), but we're alw
 | `robius-location` | 1.77 | 26 |
 | `robius-open` | 1.72 | None |
 | `robius-share` | 1.77 | 26) |
+| `robius-theme` | 1.77 | 26 |
 | `robius-web-auth-session` | 1.71 | Unsupported |
 
 

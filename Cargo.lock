@@ -1094,6 +1094,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "robius-theme"
+version = "0.3.1"
+dependencies = [
+ "dispatch2",
+ "jni",
+ "objc2",
+ "objc2-foundation",
+ "objc2-ui-kit",
+ "robius-android-env",
+ "zbus",
+]
+
+[[package]]
 name = "robius-web-auth-session"
 version = "0.3.1"
 dependencies = [
