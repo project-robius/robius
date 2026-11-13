@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15-intel, windows-2022, ubuntu-latest]
+        os: [macos-15, macos-15-intel, windows-2022, ubuntu-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -39,7 +39,7 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test -p robius-theme --test windows -- --ignored
       - name: Compile the iOS backend
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-15'
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
           cargo clippy -p robius-theme --target aarch64-apple-ios -- -D warnings

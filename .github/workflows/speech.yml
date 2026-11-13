@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15-intel, windows-2022, ubuntu-latest]
+        os: [macos-15, macos-15-intel, windows-2022, ubuntu-latest]
     env:
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
@@ -39,16 +39,16 @@ jobs:
         if: runner.os == 'macOS'
         run: bash crates/speech/swift/tests/run.sh
       - name: Compile iOS backends
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-15'
         run: |
           rustup target add aarch64-apple-ios aarch64-apple-ios-sim
           cargo check -p robius-speech --target aarch64-apple-ios
           cargo check -p robius-speech --target aarch64-apple-ios-sim
       - uses: actions/setup-java@v4
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-15'
         with:
           distribution: temurin
           java-version: '17'
       - name: Android speech lifecycle regressions
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-15'
         run: python3 crates/speech/tests/android_retry_test.py
